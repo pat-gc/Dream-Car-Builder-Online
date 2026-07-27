@@ -25,6 +25,7 @@ function GroundPlane({ onPointerDown }: { onPointerDown: (point: Vector3, event:
         position={[0, -0.001, 0]}
         receiveShadow
         onPointerDown={(e) => {
+          if (e.button !== 0 && e.nativeEvent?.button !== 0) return
           e.stopPropagation()
           onPointerDown(e.point, e)
         }}
@@ -56,8 +57,16 @@ function NodeSphere({ node, isSelected, isFixed, onClick, onPointerDown }: {
       position={node.position.toArray()}
       castShadow
       receiveShadow
-      onPointerDown={(e) => { e.stopPropagation(); onPointerDown(node.id, e); }}
-      onClick={(e) => { e.stopPropagation(); onClick(node.id); }}
+      onPointerDown={(e) => {
+        if (e.button !== 0 && e.nativeEvent?.button !== 0) return
+        e.stopPropagation()
+        onPointerDown(node.id, e)
+      }}
+      onClick={(e) => {
+        if (e.button !== 0 && e.nativeEvent?.button !== 0) return
+        e.stopPropagation()
+        onClick(node.id)
+      }}
     />
   )
 }
@@ -86,7 +95,11 @@ function BeamCylinder({ beam, nodeA, nodeB, isBroken, onClick }: {
         scale={[0.05, length, 0.05]}
         castShadow
         receiveShadow
-        onClick={(e) => { e.stopPropagation(); onClick(beam.id); }}
+        onClick={(e) => {
+          if (e.button !== 0 && e.nativeEvent?.button !== 0) return
+          e.stopPropagation()
+          onClick(beam.id)
+        }}
       />
     </group>
   )
@@ -323,6 +336,39 @@ function SceneContent({
   )
 }
 
+function PhysicsLoop({
+  setNetworkState,
+  isSimulating,
+}: {
+  networkState: NodeBeamNetworkState
+  setNetworkState: React.Dispatch<React.SetStateAction<NodeBeamNetworkState>>
+  isSimulating: boolean
+}) {
+  useFrame((_, delta) => {
+    if (!isSimulating) return
+    const clampedDelta = Math.min(delta, 0.1)
+    setNetworkState((prev) => {
+      const next = {
+        ...prev,
+        nodes: { ...prev.nodes },
+        beams: { ...prev.beams },
+        nextNodeId: prev.nextNodeId,
+        nextBeamId: prev.nextBeamId,
+      }
+      for (const key of Object.keys(next.nodes)) {
+        const node = next.nodes[Number(key)]
+        next.nodes[Number(key)] = { ...node, position: node.position.clone(), velocity: node.velocity.clone(), forceAccumulator: new THREE.Vector3() }
+      }
+      for (const key of Object.keys(next.beams)) {
+        next.beams[Number(key)] = { ...next.beams[Number(key)] }
+      }
+      stepPhysics(next, clampedDelta, DEFAULT_PHYSICS_OPTIONS)
+      return next
+    })
+  })
+  return null
+}
+
 export default function App() {
   const cameraRef = useRef<THREE.Camera | null>(null)
   const controlsRef = useRef<any>(null)
@@ -382,6 +428,7 @@ export default function App() {
           setDragPlane={setDragPlane}
           isSimulating={isSimulating}
         />
+        <PhysicsLoop networkState={networkState} setNetworkState={setNetworkState} isSimulating={isSimulating} />
         <OrbitControls
           makeDefault
           enableDamping
@@ -389,6 +436,8 @@ export default function App() {
           minDistance={2}
           maxDistance={100}
           maxPolarAngle={Math.PI / 2 - 0.05}
+          mouseButtons={{ LEFT: undefined, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }}
+          enabled={draggingNodeId === null}
           ref={controlsRef}
         />
       </Canvas>
