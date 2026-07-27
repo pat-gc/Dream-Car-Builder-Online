@@ -17,6 +17,7 @@ export interface Beam {
   stiffness: number
   damping: number
   maxStress: number
+  currentStress?: number
 }
 
 export interface NodeBeamNetworkState {
