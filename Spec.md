@@ -97,11 +97,56 @@ independently. Add a separate, togglable **Axis Snap** mode for beam placement:
 - Both snap toggles should be adjustable/visible in the Editor UI (increment
   size dropdown + axis-snap on/off, with optional angle-increment setting).
 
-## Build Order (one concern per prompt, verify before moving on)
+## State Management & Performance Patterns
+These conventions are confirmed working well through Step 3 and must be
+maintained/extended as the project grows:
+
+- **Pure functional state for the network model** (`src/sim/network.ts`):
+  every mutation returns a new cloned state, zero React/R3F dependencies,
+  only depends on three.js math. Keep this pattern for all future network
+  operations (SELECT_MOVE, DELETE, symmetry, etc.) — do not introduce
+  in-place mutation here.
+- **Editor/app state moves to Zustand once modes are introduced (Step 4+).**
+  `useState` in `App.tsx` is fine for the Step 3 hardcoded test network, but
+  once `ADD_BEAM`/`SELECT_MOVE`/`DELETE`/snap settings/selection sets exist,
+  centralize them in a Zustand store instead of prop-drilling or scattering
+  `useState` calls across `App.tsx`. The `NetworkState` itself can live in
+  the same store or a separate one — keep the pure functional update pattern
+  either way.
+- **Physics loop (Step 8/9) must NOT drive per-frame React state updates.**
+  Running `setState` at 60fps inside `useFrame` causes reconciliation
+  bottlenecks. Instead:
+  - Store live/mutable simulation values (positions, velocities) in refs or
+    a transient (non-reactive) store, updated directly inside `useFrame`.
+  - Sync coordinates straight to each mesh's underlying `position`/
+    `quaternion` objects imperatively — bypass React re-render for the hot
+    path.
+  - Only push the final state back into reactive state (Zustand/`useState`)
+    when the simulation is paused/stopped, e.g. for the reset-to-snapshot
+    behavior.
+- **Rendering performance conventions** to carry forward from
+  `NetworkRenderer.tsx`:
+  - Memoize per-beam geometry math (`useMemo` keyed on endpoint positions)
+    so only beams connected to a moved node recompute.
+  - Reuse a single unit-length `cylinderGeometry`, scaled per beam, rather
+    than constructing new geometry per beam.
+  - Squared-distance comparisons for any proximity/threshold checks
+    (`findOrCreateNode`, merge, snapping) — never take an unnecessary
+    `sqrt`.
+  - Guard against degenerate/zero-length beams (`NaN` quaternion checks)
+    before rendering.
+  - **Once node/beam counts grow large (vehicles, complex trusses):**
+    migrate `NodeMesh`/`BeamMesh` to `<instancedMesh>` to collapse draw
+    calls. Flag this as a checkpoint once a single structure regularly
+    exceeds roughly 100+ nodes/beams, rather than doing it prematurely.
+
+
 1. Scaffold: Vite + R3F canvas, grid floor, camera, deploy config
 2. Node3D/Beam3D types + network manager (add/remove/merge) — with unit tests
 3. Static renderer: nodes as spheres, beams as cylinders
-4. Editor UI overlay (outside Canvas) with mode toggle — no interactivity yet
+4. Editor UI overlay (outside Canvas) with mode toggle — no interactivity yet.
+   Introduce Zustand store here for editor mode/state (see State Management
+   section) rather than continuing with ad-hoc useState.
 5. Camera-perpendicular placement plane (isolated, no beam logic yet — just
    confirm raycasting works and logs hit points)
 6. Placement plane wired to a live ghost point (single node preview only,
@@ -110,7 +155,8 @@ independently. Add a separate, togglable **Axis Snap** mode for beam placement:
 8. Physics solver (`stepPhysics`) as a pure function + unit tests, not yet
    wired to rendering
 9. PhysicsLoop component inside Canvas, Simulate/Stop toggle with state
-   snapshot + reset
+   snapshot + reset. Follow the ref-based/imperative-sync pattern from the
+   State Management section — no per-frame setState.
 10. Pinned/anchor nodes
 11. SELECT_MOVE drag tool
 12. DELETE tool

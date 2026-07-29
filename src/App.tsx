@@ -1,6 +1,43 @@
+import { useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Grid } from '@react-three/drei'
 import * as THREE from 'three'
+import { addNode, addBeam, createNetworkState } from './sim/network'
+import type { NetworkState } from './sim/network'
+import NetworkRenderer from './components/NetworkRenderer'
+
+function buildTestNetwork(): NetworkState {
+  let s = createNetworkState()
+  const n0 = addNode(s, new THREE.Vector3(0, 0, 0), 1, true)
+  s = n0.state
+  const n1 = addNode(s, new THREE.Vector3(3, 0, 0))
+  s = n1.state
+  const n2 = addNode(s, new THREE.Vector3(3, 0, 3))
+  s = n2.state
+  const n3 = addNode(s, new THREE.Vector3(0, 0, 3))
+  s = n3.state
+  const n4 = addNode(s, new THREE.Vector3(1.5, 2.5, 1.5))
+  s = n4.state
+
+  const b01 = addBeam(s, n0.node.id, n1.node.id)
+  s = b01!.state
+  const b12 = addBeam(s, n1.node.id, n2.node.id)
+  s = b12!.state
+  const b23 = addBeam(s, n2.node.id, n3.node.id)
+  s = b23!.state
+  const b30 = addBeam(s, n3.node.id, n0.node.id)
+  s = b30!.state
+  const b04 = addBeam(s, n0.node.id, n4.node.id)
+  s = b04!.state
+  const b14 = addBeam(s, n1.node.id, n4.node.id)
+  s = b14!.state
+  const b24 = addBeam(s, n2.node.id, n4.node.id)
+  s = b24!.state
+  const b34 = addBeam(s, n3.node.id, n4.node.id)
+  s = b34!.state
+
+  return s
+}
 
 function Scene() {
   return (
@@ -37,26 +74,13 @@ function Scene() {
         followCamera={false}
         position={[0, 0.02, 0]}
       />
-
-      <mesh
-        rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, 0, 0]}
-        receiveShadow
-      >
-        <planeGeometry args={[200, 200]} />
-        <shadowMaterial
-          transparent
-          opacity={0.25}
-          polygonOffset
-          polygonOffsetFactor={1}
-          polygonOffsetUnits={1}
-        />
-      </mesh>
     </>
   )
 }
 
 export default function App() {
+  const [networkState] = useState<NetworkState>(() => buildTestNetwork())
+
   return (
     <Canvas
       shadows
@@ -64,6 +88,7 @@ export default function App() {
       gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping }}
     >
       <Scene />
+      <NetworkRenderer networkState={networkState} />
       <OrbitControls
         makeDefault
         mouseButtons={{
