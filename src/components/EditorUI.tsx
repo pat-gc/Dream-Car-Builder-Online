@@ -10,18 +10,37 @@ interface EditorUIProps {
   setMode: (mode: EditorMode) => void
   selectedNodeId: number | null
   setSelectedNodeId: (id: number | null) => void
-  pendingBeamNodeId: number | null
-  setPendingBeamNodeId: (id: number | null) => void
   onClearNetwork: () => void
   isSimulating: boolean
   onToggleSimulate: () => void
+  onViewAlign: (view: string) => void
+  beamStage: 'idle' | 'placing' | 'dragging'
+  beamStartNodeId: number | null
+  snapSize: number
+  onSnapSizeChange: (size: number) => void
 }
+
+const SNAP_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: 'Off' },
+  { value: 0.1, label: '0.1' },
+  { value: 0.25, label: '0.25' },
+  { value: 0.5, label: '0.5' },
+  { value: 1.0, label: '1.0' },
+  { value: 2.0, label: '2.0' },
+]
 
 const MODES: { id: EditorMode; label: string; shortcut: string; description: string }[] = [
   { id: 'addNode', label: 'Add Node', shortcut: '1', description: 'Click ground to place nodes' },
-  { id: 'addBeam', label: 'Add Beam', shortcut: '2', description: 'Click two nodes to connect' },
+  { id: 'addBeam', label: 'Add Beam', shortcut: '2', description: 'Two-click beam placement' },
   { id: 'delete', label: 'Delete', shortcut: '3', description: 'Click node or beam to remove' },
   { id: 'select', label: 'Select/Move', shortcut: '4', description: 'Drag nodes to reposition' },
+]
+
+const VIEW_BUTTONS = [
+  { id: 'top', label: 'Top', axis: 'Y' },
+  { id: 'front', label: 'Front', axis: 'Z' },
+  { id: 'side', label: 'Side', axis: 'X' },
+  { id: 'perspective', label: 'Persp', axis: '' },
 ]
 
 export function EditorUI({
@@ -30,11 +49,14 @@ export function EditorUI({
   setMode,
   selectedNodeId,
   setSelectedNodeId,
-  pendingBeamNodeId,
-  setPendingBeamNodeId,
   onClearNetwork,
   isSimulating,
   onToggleSimulate,
+  onViewAlign,
+  beamStage,
+  beamStartNodeId,
+  snapSize,
+  onSnapSizeChange,
 }: EditorUIProps) {
   const nodeCount = Object.keys(networkState.nodes).length
   const beamCount = Object.keys(networkState.beams).length
@@ -65,7 +87,9 @@ export function EditorUI({
 
   const buttonBase = useMemo<CSSProperties>(() => ({
     padding: '8px 14px',
-    border: '1px solid #2a2a2a',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: '#2a2a2a',
     borderRadius: 6,
     background: '#1a1a1a',
     color: '#ccc',
@@ -83,6 +107,13 @@ export function EditorUI({
     borderColor: '#3a6a3a',
     color: '#9f9',
     boxShadow: '0 0 12px rgba(80, 200, 80, 0.25)',
+  }), [buttonBase])
+
+  const viewButtonStyle = useMemo<CSSProperties>(() => ({
+    ...buttonBase,
+    padding: '6px 10px',
+    fontSize: 12,
+    minWidth: 56,
   }), [buttonBase])
 
   const statsStyle = useMemo<CSSProperties>(() => ({
@@ -123,6 +154,30 @@ export function EditorUI({
     marginLeft: 'auto',
   }), [buttonBase])
 
+  const snapRowStyle = useMemo<CSSProperties>(() => ({
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    padding: '8px 10px',
+    background: '#161616',
+    border: '1px solid #2a2a2a',
+    borderRadius: 6,
+    marginBottom: 10,
+    fontSize: 12,
+    color: '#bbb',
+  }), [])
+
+  const snapSelectStyle = useMemo<CSSProperties>(() => ({
+    padding: '4px 8px',
+    background: '#1a1a1a',
+    color: '#e0e0e0',
+    border: '1px solid #3a3a3a',
+    borderRadius: 4,
+    fontSize: 12,
+    cursor: 'pointer',
+  }), [])
+
   const infoStyle = useMemo<CSSProperties>(() => ({
     position: 'fixed',
     bottom: 12,
@@ -137,11 +192,33 @@ export function EditorUI({
     fontFamily: 'system-ui, -apple-system, sans-serif',
   }), [])
 
+  const viewCubeStyle = useMemo<CSSProperties>(() => ({
+    position: 'fixed',
+    top: 12,
+    right: 12,
+    zIndex: 100,
+    background: 'rgba(10, 10, 10, 0.92)',
+    border: '1px solid #2a2a2a',
+    borderRadius: 10,
+    padding: 10,
+    boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+    backdropFilter: 'blur(8px)',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    color: '#e0e0e0',
+    minWidth: 140,
+  }), [])
+
+  const viewCubeButton = useMemo<CSSProperties>(() => ({
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    marginTop: 8,
+  }), [])
+
   const handleModeClick = useCallback((m: EditorMode) => {
     setMode(m)
     setSelectedNodeId(null)
-    setPendingBeamNodeId(null)
-  }, [setMode, setSelectedNodeId, setPendingBeamNodeId])
+  }, [setMode, setSelectedNodeId])
 
   return (
     <>
@@ -173,7 +250,7 @@ export function EditorUI({
             onClick={onToggleSimulate}
             title="Space"
           >
-            {isSimulating ? '⏸ Pause' : '▶ Simulate'}
+            {isSimulating ? '⏸ Stop' : '▶ Simulate'}
           </button>
         </div>
 
@@ -192,22 +269,44 @@ export function EditorUI({
           </div>
         </div>
 
-        {pendingBeamNodeId !== null && mode === 'addBeam' && (
+        <div style={snapRowStyle}>
+          <label htmlFor="snap-size-select" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Snap Size
+            </span>
+            <span style={{ fontSize: 10, color: '#666' }}>(new + drag)</span>
+          </label>
+          <select
+            id="snap-size-select"
+            value={snapSize}
+            onChange={(e) => onSnapSizeChange(parseFloat(e.target.value))}
+            style={snapSelectStyle}
+            title="Grid snap size for new nodes and node dragging (0 = off)"
+          >
+            {SNAP_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {(beamStage === 'placing' || beamStage === 'dragging') && beamStartNodeId !== null && (
           <div style={{
             padding: '8px 12px',
-            background: 'rgba(60, 50, 0, 0.9)',
-            border: '1px solid #6a5a00',
+            background: 'rgba(0, 40, 60, 0.9)',
+            border: '1px solid #005a6a',
             borderRadius: 6,
             marginBottom: 10,
             fontSize: 12,
-            color: '#ffd700',
+            color: '#6fe',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
           }}>
-            <span>Beam: node <strong>{pendingBeamNodeId}</strong> selected. Click another node.</span>
+            <span>Beam: node <strong>{beamStartNodeId}</strong> → click target</span>
             <button
-              onClick={() => setPendingBeamNodeId(null)}
+              onClick={() => setMode('select')}
               style={{ ...buttonBase, padding: '4px 10px', fontSize: 11 }}
             >
               Cancel
@@ -245,14 +344,34 @@ export function EditorUI({
         </div>
       </div>
 
+      <div style={viewCubeStyle}>
+        <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, textAlign: 'center', color: '#aaa' }}>
+          Camera Views
+        </div>
+        <div style={viewCubeButton}>
+          {VIEW_BUTTONS.map((v) => (
+            <button
+              key={v.id}
+              style={viewButtonStyle}
+              onClick={() => onViewAlign(v.id)}
+              title={v.label}
+            >
+              {v.label}
+              {v.axis && <span style={{ fontSize: 9, color: '#888', marginLeft: 4 }}>[{v.axis}]</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div style={infoStyle}>
         <div>1 / 2 / 3 / 4 — Switch modes</div>
-        <div>Space — Play / Pause simulation</div>
-        <div>Click ground — Add node (mode 1)</div>
-        <div>Click node — Select / Start beam (mode 2)</div>
-        <div>Click node/beam — Delete (mode 3)</div>
-        <div>Drag node — Move (mode 4)</div>
-        <div>Orbit: LMB+Drag | Pan: RMB+Drag | Zoom: Wheel</div>
+        <div>Space — Play / Stop simulation</div>
+        {mode === 'addNode' && <div>Click ground — Add node</div>}
+        {mode === 'addBeam' && beamStage === 'idle' && <div>Click node or ground — Set beam start</div>}
+        {mode === 'addBeam' && beamStage === 'dragging' && <div>Hover target — Click to place beam end</div>}
+        {mode === 'delete' && <div>Click node/beam — Delete</div>}
+        {mode === 'select' && <div>Drag node — Move {snapSize > 0 ? `(snap ${snapSize})` : '(no snap)'}</div>}
+        <div>Orbit: RMB+Drag | Pan: MMB+Drag | Zoom: Wheel</div>
       </div>
     </>
   )
