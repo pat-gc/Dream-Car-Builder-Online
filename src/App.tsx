@@ -35,15 +35,22 @@ function Scene() {
         fadeStrength={1}
         infiniteGrid
         followCamera={false}
+        position={[0, 0.02, 0]}
       />
 
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, -0.01, 0]}
+        position={[0, 0, 0]}
         receiveShadow
       >
         <planeGeometry args={[200, 200]} />
-        <shadowMaterial transparent opacity={0.25} />
+        <shadowMaterial
+          transparent
+          opacity={0.25}
+          polygonOffset
+          polygonOffsetFactor={1}
+          polygonOffsetUnits={1}
+        />
       </mesh>
     </>
   )
