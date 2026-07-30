@@ -162,7 +162,7 @@ export default function InteractionRouter({
         return
       }
 
-      if (!activeForBuild()) return
+      if (!activeForBuild() && !activeForSelectMove()) return
 
       const rect = dom.getBoundingClientRect()
       const nodeHit = getNearestNodeHit(
@@ -182,6 +182,8 @@ export default function InteractionRouter({
       if (prev !== null && prev !== undefined) {
         useEditorStore.getState().clearHoveredNodeId()
       }
+
+      if (!activeForBuild()) return
 
       const planeMesh = planeMeshRef.current
       if (planeMesh === null) return

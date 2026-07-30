@@ -183,9 +183,29 @@ export function moveNode(
 ): NetworkState {
   const node = state.nodes.get(nodeId)
   if (node === undefined) return state
+  if (node.position.distanceToSquared(position) < 1e-18) return state
+
   const next = cloneState(state)
-  const moved = next.nodes.get(nodeId)
-  if (moved === undefined) return next
-  moved.position.copy(position)
+  const moved: Node3D = {
+    ...node,
+    position: position.clone(),
+    velocity: node.velocity.clone(),
+    force: node.force.clone(),
+  }
+  next.nodes.set(nodeId, moved)
+
+  for (const [beamId, beam] of next.beams) {
+    if (beam.nodeAId !== nodeId && beam.nodeBId !== nodeId) {
+      continue
+    }
+    const a = next.nodes.get(beam.nodeAId)
+    const b = next.nodes.get(beam.nodeBId)
+    if (a === undefined || b === undefined) {
+      continue
+    }
+    const updated: Beam3D = { ...beam, restLength: a.position.distanceTo(b.position) }
+    next.beams.set(beamId, updated)
+  }
+
   return next
 }
