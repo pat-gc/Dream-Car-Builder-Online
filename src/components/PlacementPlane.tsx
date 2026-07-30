@@ -1,16 +1,20 @@
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, type MutableRefObject } from 'react'
 import { useThree, useFrame, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
+import { useEditorStore } from '../store/editorStore'
+import { snapToIncrement } from '../sim/snap'
 
 const PLANE_SIZE = 1000
 const PLANE_DEFAULT_NORMAL = new THREE.Vector3(0, 0, 1)
 
 interface PlacementPlaneProps {
   depthOverride?: THREE.Vector3 | null
+  ghostPointRef?: MutableRefObject<THREE.Vector3 | null>
 }
 
 export default function PlacementPlane({
   depthOverride = null,
+  ghostPointRef,
 }: PlacementPlaneProps) {
   const meshRef = useRef<THREE.Mesh>(null!)
   const { camera } = useThree()
@@ -21,8 +25,7 @@ export default function PlacementPlane({
       quat: new THREE.Quaternion(),
       depthPoint: new THREE.Vector3(),
       up: new THREE.Vector3(0, 1, 0),
-      right: new THREE.Vector3(1, 0, 0),
-      matrix: new THREE.Matrix4(),
+      snapped: new THREE.Vector3(),
     }),
     [],
   )
@@ -46,7 +49,6 @@ export default function PlacementPlane({
 
     const dot = PLANE_DEFAULT_NORMAL.dot(temp.worldDir)
     if (1 - Math.abs(dot) < 1e-6) {
-      // co-linear or anti-parallel
       if (dot < 0) {
         temp.quat.setFromAxisAngle(temp.up, Math.PI)
       } else {
@@ -65,12 +67,30 @@ export default function PlacementPlane({
 
   function handlePointerMove(e: ThreeEvent<PointerEvent>) {
     e.stopPropagation()
-    console.log(
-      '[PlacementPlane] hit:',
-      e.point.x.toFixed(3),
-      e.point.y.toFixed(3),
-      e.point.z.toFixed(3),
+
+    const inc = useEditorStore.getState().snapIncrement
+    temp.snapped.set(
+      snapToIncrement(e.point.x, inc),
+      snapToIncrement(e.point.y, inc),
+      snapToIncrement(e.point.z, inc),
     )
+
+    if (ghostPointRef !== undefined) {
+      if (ghostPointRef.current === null) {
+        ghostPointRef.current = new THREE.Vector3()
+      }
+      ghostPointRef.current.copy(temp.snapped)
+    }
+
+    const mode = useEditorStore.getState().mode
+    if (mode === 'ADD_BEAM') {
+      console.log(
+        '[PlacementPlane] snapped hit:',
+        temp.snapped.x.toFixed(3),
+        temp.snapped.y.toFixed(3),
+        temp.snapped.z.toFixed(3),
+      )
+    }
   }
 
   function handleClick(e: ThreeEvent<MouseEvent>) {

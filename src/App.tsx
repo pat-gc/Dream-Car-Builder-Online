@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Grid } from '@react-three/drei'
 import * as THREE from 'three'
@@ -7,6 +7,7 @@ import type { NetworkState } from './sim/network'
 import NetworkRenderer from './components/NetworkRenderer'
 import EditorUI from './components/EditorUI'
 import PlacementPlane from './components/PlacementPlane'
+import GhostPreview from './components/GhostPreview'
 
 function Scene() {
   return (
@@ -49,6 +50,7 @@ function Scene() {
 
 export default function App() {
   const [networkState] = useState<NetworkState>(() => createNetworkState())
+  const ghostPointRef = useRef<THREE.Vector3 | null>(null)
 
   return (
     <div
@@ -67,7 +69,8 @@ export default function App() {
       >
         <Scene />
         <NetworkRenderer networkState={networkState} />
-        <PlacementPlane />
+        <PlacementPlane ghostPointRef={ghostPointRef} />
+        <GhostPreview ghostPointRef={ghostPointRef} />
         <OrbitControls
           makeDefault
           mouseButtons={{
