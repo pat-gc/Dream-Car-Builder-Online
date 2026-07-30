@@ -3,7 +3,9 @@ import * as THREE from 'three'
 import {
   addNode,
   addBeam,
+  addBeamWithMirror,
   findOrCreateNode,
+  mirrorPosition,
   moveNode,
   moveNodes,
   removeNode,
@@ -522,5 +524,159 @@ describe('resetKinematics', () => {
     resetN1.velocity.set(9, 9, 9)
 
     expect(n1.velocity.equals(new THREE.Vector3(1, 2, 3))).toBe(true)
+  })
+})
+
+describe('mirrorPosition', () => {
+  it('negates x across the X axis and leaves y/z', () => {
+    const p = new THREE.Vector3(2, 3, 4)
+    const m = mirrorPosition(p, 'X')
+    expect(m.equals(new THREE.Vector3(-2, 3, 4))).toBe(true)
+  })
+
+  it('negates z across the Z axis and leaves x/y', () => {
+    const p = new THREE.Vector3(2, 3, 4)
+    const m = mirrorPosition(p, 'Z')
+    expect(m.equals(new THREE.Vector3(2, 3, -4))).toBe(true)
+  })
+
+  it('returns a new vector (does not mutate input)', () => {
+    const p = new THREE.Vector3(1, 2, 3)
+    const m = mirrorPosition(p, 'X')
+    expect(m).not.toBe(p)
+    expect(p.equals(new THREE.Vector3(1, 2, 3))).toBe(true)
+  })
+})
+
+describe('addBeamWithMirror', () => {
+  it('creates both the original and the mirrored beam across X', () => {
+    const s = createNetworkState()
+    const result = addBeamWithMirror(
+      s,
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(1, 0, 3),
+      'X',
+      true,
+    )
+
+    expect(result.originalBeamId).not.toBeNull()
+    expect(result.mirrorBeamId).not.toBeNull()
+    expect(result.state.beams.size).toBe(2)
+    expect(result.state.nodes.size).toBe(4)
+  })
+
+  it('disabled mirror creates only the original beam', () => {
+    const s = createNetworkState()
+    const result = addBeamWithMirror(
+      s,
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(1, 0, 3),
+      'X',
+      false,
+    )
+
+    expect(result.originalBeamId).not.toBeNull()
+    expect(result.mirrorBeamId).toBeNull()
+    expect(result.state.beams.size).toBe(1)
+    expect(result.state.nodes.size).toBe(2)
+  })
+
+  it('shares a centerline node when an endpoint lies on the mirror plane', () => {
+    const s = createNetworkState()
+    // Start at x=0 (on plane), end at x=2 (off plane).
+    const result = addBeamWithMirror(
+      s,
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(2, 0, 0),
+      'X',
+      true,
+    )
+
+    expect(result.state.beams.size).toBe(2)
+    // Original start (x=0) and mirrored start (mirror of x=0 = x=0) merge
+    // into one shared node, so 3 nodes total instead of 4.
+    expect(result.state.nodes.size).toBe(3)
+  })
+
+  it('skips the mirrored beam when endpoints are already symmetric (beam on/across plane)', () => {
+    const s = createNetworkState()
+    // start=(1,0,0), end=(-1,0,0): end == mirror(start) across X.
+    const result = addBeamWithMirror(
+      s,
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(-1, 0, 0),
+      'X',
+      true,
+    )
+
+    expect(result.originalBeamId).not.toBeNull()
+    expect(result.mirrorBeamId).toBeNull()
+    expect(result.state.beams.size).toBe(1)
+    expect(result.state.nodes.size).toBe(2)
+  })
+
+  it('mirrors across Z (negating z)', () => {
+    const s = createNetworkState()
+    const result = addBeamWithMirror(
+      s,
+      new THREE.Vector3(0, 0, 2),
+      new THREE.Vector3(3, 0, 2),
+      'Z',
+      true,
+    )
+
+    expect(result.originalBeamId).not.toBeNull()
+    expect(result.mirrorBeamId).not.toBeNull()
+    expect(result.state.beams.size).toBe(2)
+    // mirrored endpoints at z=-2
+    const zValues = Array.from(result.state.nodes.values()).map((n) => n.position.z)
+    expect(zValues).toContain(2)
+    expect(zValues).toContain(-2)
+  })
+
+  it('does not duplicate an already-existing mirror beam', () => {
+    let s = createNetworkState()
+    const first = addBeamWithMirror(
+      s,
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(1, 0, 3),
+      'X',
+      true,
+    )
+    s = first.state
+    expect(s.beams.size).toBe(2)
+
+    // Draw the exact same beam again: original duplicates are rejected by
+    // addBeam, and the mirror beam already exists between the mirrored nodes,
+    // so no new beams are added.
+    const second = addBeamWithMirror(
+      s,
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(1, 0, 3),
+      'X',
+      true,
+    )
+    expect(second.state.beams.size).toBe(2)
+    expect(second.mirrorBeamId).toBeNull()
+    expect(second.originalBeamId).toBeNull()
+  })
+
+  it('reuses existing mirrored nodes via merge threshold', () => {
+    let s = createNetworkState()
+    // Pre-place a node exactly where the mirrored end will land.
+    const pre = addNode(s, new THREE.Vector3(-1, 0, 3))
+    s = pre.state
+
+    const result = addBeamWithMirror(
+      s,
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(1, 0, 3),
+      'X',
+      true,
+    )
+
+    // The mirrored end position is (-1,0,3) which merges into pre-existing node.
+    expect(result.state.nodes.has(pre.node.id)).toBe(true)
+    expect(result.state.nodes.size).toBe(4)
   })
 })

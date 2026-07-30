@@ -283,6 +283,10 @@ export default function InteractionRouter({
       const s = useEditorStore.getState()
 
       // --- Active group drag ---
+      // NOTE: mirrored group-drag (dragging a node also moves its mirrored
+      // counterpart symmetrically when symmetry is on) is intentionally NOT
+      // implemented in this pass to avoid destabilizing the STEP 13 drag;
+      // mirrored beam *creation* is the Step 14 priority. See Spec.md step 14.
       if (
         s.mode === 'SELECT_MOVE' &&
         s.draggedNodeId !== null &&
@@ -725,7 +729,13 @@ export default function InteractionRouter({
           const startId = state.beamStartNodeId
           if (startId === null || startId === undefined) return
           if (nodeHit.nodeId === startId) return
-          const ok = network.commitBeamEndToNode(nodeHit.nodeId, startId)
+          const ok = state.symmetryEnabled
+            ? network.commitBeamEndToNodeWithSymmetry(
+                nodeHit.nodeId,
+                startId,
+                state.symmetryAxis,
+              )
+            : network.commitBeamEndToNode(nodeHit.nodeId, startId)
           if (ok) state.resetBeamPlacement()
         }
         return
@@ -772,13 +782,19 @@ export default function InteractionRouter({
             ? ghostPointRef.current.clone()
             : snapped.clone()
 
-        const { beamStartNodeId, resetBeamPlacement } =
-          useEditorStore.getState()
+        const ed = useEditorStore.getState()
+        const beamStartNodeId = ed.beamStartNodeId
         if (beamStartNodeId === null || beamStartNodeId === undefined) return
 
-        const { commitBeamEnd } = useNetworkStore.getState()
-        const ok = commitBeamEnd(endPoint, beamStartNodeId)
-        if (ok) resetBeamPlacement()
+        const network = useNetworkStore.getState()
+        const ok = ed.symmetryEnabled
+          ? network.commitBeamEndWithSymmetry(
+              endPoint,
+              beamStartNodeId,
+              ed.symmetryAxis,
+            )
+          : network.commitBeamEnd(endPoint, beamStartNodeId)
+        if (ok) ed.resetBeamPlacement()
       }
     }
 

@@ -10,6 +10,7 @@ import GhostBeamPreview from './components/GhostBeamPreview'
 import PhysicsLoop from './components/PhysicsLoop'
 import InteractionRouter from './components/InteractionRouter'
 import MarqueeOverlay from './components/MarqueeOverlay'
+import MirrorPlane from './components/MirrorPlane'
 
 function Scene() {
   return (
@@ -76,6 +77,7 @@ export default function App() {
         <PlacementPlane planeMeshRef={planeMeshRef} />
         <GhostPreview ghostPointRef={ghostPointRef} />
         <GhostBeamPreview ghostPointRef={ghostPointRef} />
+        <MirrorPlane />
         <InteractionRouter
           planeMeshRef={planeMeshRef}
           ghostPointRef={ghostPointRef}

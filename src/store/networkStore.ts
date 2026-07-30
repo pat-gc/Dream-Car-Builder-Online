@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import * as THREE from 'three'
 import {
   addBeam,
+  addBeamWithMirror,
   createNetworkState,
   findOrCreateNode,
   moveNode,
@@ -9,6 +10,7 @@ import {
   removeBeam,
   removeNode,
   type NetworkState,
+  type SymmetryAxis,
 } from '../sim/network'
 
 export interface NetworkStoreState {
@@ -21,6 +23,16 @@ export interface NetworkStoreState {
     startNodeId: string,
   ) => boolean
   commitBeamEndToNode: (endNodeId: string, startNodeId: string) => boolean
+  commitBeamEndWithSymmetry: (
+    endPos: THREE.Vector3,
+    startNodeId: string,
+    axis: SymmetryAxis,
+  ) => boolean
+  commitBeamEndToNodeWithSymmetry: (
+    endNodeId: string,
+    startNodeId: string,
+    axis: SymmetryAxis,
+  ) => boolean
   commitNodeMove: (nodeId: string, position: THREE.Vector3) => void
   commitNodeMoves: (moves: Map<string, THREE.Vector3>) => void
   deleteNode: (nodeId: string) => void
@@ -75,6 +87,49 @@ export const useNetworkStore = create<NetworkStoreState>((set, get) => ({
     }
     set({ networkState: result.state })
     return true
+  },
+
+  commitBeamEndWithSymmetry: (endPos, startNodeId, axis) => {
+    if (startNodeId === null || startNodeId === undefined) return false
+    const state = get().networkState
+    const startNode = state.nodes.get(startNodeId)
+    if (startNode === undefined) return false
+    const result = addBeamWithMirror(
+      state,
+      startNode.position,
+      endPos,
+      axis,
+      true,
+    )
+    set({ networkState: result.state })
+    return result.originalBeamId !== null
+  },
+
+  commitBeamEndToNodeWithSymmetry: (endNodeId, startNodeId, axis) => {
+    if (
+      endNodeId === null ||
+      endNodeId === undefined ||
+      startNodeId === null ||
+      startNodeId === undefined
+    ) {
+      return false
+    }
+    if (endNodeId === startNodeId) {
+      return false
+    }
+    const state = get().networkState
+    const startNode = state.nodes.get(startNodeId)
+    const endNode = state.nodes.get(endNodeId)
+    if (startNode === undefined || endNode === undefined) return false
+    const result = addBeamWithMirror(
+      state,
+      startNode.position,
+      endNode.position,
+      axis,
+      true,
+    )
+    set({ networkState: result.state })
+    return result.originalBeamId !== null
   },
 
   commitNodeMove: (nodeId, position) => {

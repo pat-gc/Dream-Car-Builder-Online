@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import type { Beam3D, Node3D } from '../types/nodeGraph'
 
+export type SymmetryAxis = 'X' | 'Z'
+
 export interface NetworkState {
   nodes: Map<string, Node3D>
   beams: Map<string, Beam3D>
@@ -253,4 +255,112 @@ export function moveNodes(
   }
 
   return next
+}
+
+export function mirrorPosition(
+  position: THREE.Vector3,
+  axis: SymmetryAxis,
+): THREE.Vector3 {
+  if (axis === 'X') {
+    return new THREE.Vector3(-position.x, position.y, position.z)
+  }
+  return new THREE.Vector3(position.x, position.y, -position.z)
+}
+
+export interface AddBeamWithMirrorResult {
+  state: NetworkState
+  originalBeamId: string | null
+  mirrorBeamId: string | null
+  startNodeId: string
+  endNodeId: string
+}
+
+export function addBeamWithMirror(
+  state: NetworkState,
+  startPos: THREE.Vector3,
+  endPos: THREE.Vector3,
+  axis: SymmetryAxis,
+  applyMirror: boolean,
+  mergeThreshold: number = DEFAULT_MERGE_THRESHOLD,
+): AddBeamWithMirrorResult {
+  let working = state
+
+  // Original start node (find-or-create).
+  let res = findOrCreateNode(working, startPos, mergeThreshold)
+  working = res.state
+  const startNodeId = res.nodeId
+
+  // Original end node (find-or-create).
+  res = findOrCreateNode(working, endPos, mergeThreshold)
+  working = res.state
+  const endNodeId = res.nodeId
+
+  // Original beam (skip self-loops / duplicates; null => nothing created).
+  let originalBeamId: string | null = null
+  if (startNodeId !== endNodeId) {
+    const beam = addBeam(working, startNodeId, endNodeId)
+    if (beam !== null) {
+      originalBeamId = beam.beam.id
+      working = beam.state
+    }
+  }
+
+  if (!applyMirror) {
+    return {
+      state: working,
+      originalBeamId,
+      mirrorBeamId: null,
+      startNodeId,
+      endNodeId,
+    }
+  }
+
+  // Skip the mirrored beam if the original beam already lies across the
+  // mirror plane (its endpoints are symmetric to each other), so we don't
+  // create a redundant duplicate on top of itself.
+  const sqThreshold = mergeThreshold * mergeThreshold
+  const mirrorStart = mirrorPosition(startPos, axis)
+  const mirrorEnd = mirrorPosition(endPos, axis)
+  const startMirrorsEnd = mirrorStart.distanceToSquared(endPos) <= sqThreshold
+  const endMirrorsStart = mirrorEnd.distanceToSquared(startPos) <= sqThreshold
+  if (startMirrorsEnd && endMirrorsStart) {
+    return {
+      state: working,
+      originalBeamId,
+      mirrorBeamId: null,
+      startNodeId,
+      endNodeId,
+    }
+  }
+
+  // Mirror endpoints (each origin endpoint mirrored). An endpoint that lies
+  // on the mirror plane (its axis coordinate ~0) mirrors onto itself, so
+  // findOrCreateNode merges to the same node id -> shared centerline node.
+  res = findOrCreateNode(working, mirrorStart, mergeThreshold)
+  working = res.state
+  const mStartId = res.nodeId
+  res = findOrCreateNode(working, mirrorEnd, mergeThreshold)
+  working = res.state
+  const mEndId = res.nodeId
+
+  let mirrorBeamId: string | null = null
+  if (mStartId !== mEndId) {
+    // Don't re-create a beam that already links these (mirror of an existing
+    // structure, or the user already drew it by hand).
+    if (findBeamBetween(working, mStartId, mEndId) === undefined) {
+      const mBeam = addBeam(working, mStartId, mEndId)
+      if (mBeam !== null) {
+        mirrorBeamId = mBeam.beam.id
+        working = mBeam.state
+      }
+    }
+  }
+
+  return {
+    state: working,
+    originalBeamId,
+    mirrorBeamId,
+    startNodeId,
+    endNodeId,
+  }
 }

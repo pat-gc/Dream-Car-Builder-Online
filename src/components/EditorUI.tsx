@@ -92,6 +92,44 @@ function SnapControls() {
   )
 }
 
+function SymmetryControls() {
+  const symmetryEnabled = useEditorStore((s) => s.symmetryEnabled)
+  const toggleSymmetry = useEditorStore((s) => s.toggleSymmetry)
+  const symmetryAxis = useEditorStore((s) => s.symmetryAxis)
+  const setSymmetryAxis = useEditorStore((s) => s.setSymmetryAxis)
+
+  return (
+    <div style={styles.controlsRow}>
+      <label style={styles.controlLabel}>
+        <input
+          type="checkbox"
+          checked={symmetryEnabled}
+          onChange={toggleSymmetry}
+          style={styles.checkbox}
+        />
+        Symmetry
+      </label>
+      <label style={styles.controlLabel}>
+        Mirror:
+        <select
+          value={symmetryAxis}
+          onChange={(e) => {
+            setSymmetryAxis(e.target.value as 'X' | 'Z')
+          }}
+          disabled={!symmetryEnabled}
+          style={{
+            ...styles.select,
+            ...(symmetryEnabled ? {} : styles.modeButtonDisabled),
+          }}
+        >
+          <option value="X">X axis</option>
+          <option value="Z">Z axis</option>
+        </select>
+      </label>
+    </div>
+  )
+}
+
 const styles: Record<string, React.CSSProperties> = {
   overlayWrapper: {
     position: 'fixed',
@@ -206,6 +244,7 @@ export default function EditorUI() {
       <div style={styles.panel}>
         <ModeToolbar />
         <SnapControls />
+        <SymmetryControls />
       </div>
     </div>
   )

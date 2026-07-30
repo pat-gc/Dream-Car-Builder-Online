@@ -4,6 +4,8 @@ export type EditorMode = 'ADD_BEAM' | 'SELECT_MOVE' | 'DELETE' | 'SIMULATE'
 
 export type BeamStage = 'idle' | 'awaiting-second-point'
 
+export type SymmetryAxis = 'X' | 'Z'
+
 export interface DepthVector {
   x: number
   y: number
@@ -19,6 +21,11 @@ export interface EditorState {
 
   axisSnapEnabled: boolean
   toggleAxisSnap: () => void
+
+  symmetryEnabled: boolean
+  symmetryAxis: SymmetryAxis
+  toggleSymmetry: () => void
+  setSymmetryAxis: (axis: SymmetryAxis) => void
 
   isSimulating: boolean
   setIsSimulating: (value: boolean) => void
@@ -70,6 +77,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   axisSnapEnabled: false,
   toggleAxisSnap: () => set((state) => ({ axisSnapEnabled: !state.axisSnapEnabled })),
+
+  symmetryEnabled: false,
+  symmetryAxis: 'X',
+  toggleSymmetry: () => set((state) => ({ symmetryEnabled: !state.symmetryEnabled })),
+  setSymmetryAxis: (axis) => set({ symmetryAxis: axis }),
 
   isSimulating: false,
   setIsSimulating: (value) => set({ isSimulating: value }),
