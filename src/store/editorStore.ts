@@ -22,6 +22,7 @@ export interface EditorState {
 
   isSimulating: boolean
   setIsSimulating: (value: boolean) => void
+  toggleSimulation: () => void
 
   beamStage: BeamStage
   beamStartNodeId: string | null
@@ -36,9 +37,9 @@ export interface EditorState {
   cancelBeamPlacement: () => void
 }
 
-export const useEditorStore = create<EditorState>((set) => ({
+export const useEditorStore = create<EditorState>((set, get) => ({
   mode: 'ADD_BEAM',
-  setMode: (mode) => set({ mode }),
+  setMode: (mode) => set({ mode, hoveredNodeId: null }),
 
   snapIncrement: 0.5,
   setSnapIncrement: (value) => set({ snapIncrement: value }),
@@ -48,6 +49,17 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   isSimulating: false,
   setIsSimulating: (value) => set({ isSimulating: value }),
+  toggleSimulation: () => {
+    const next = !get().isSimulating
+    set({
+      isSimulating: next,
+      mode: next ? 'SIMULATE' : get().mode,
+      hoveredNodeId: null,
+      beamStage: 'idle',
+      beamStartNodeId: null,
+      depthOverrideVector: null,
+    })
+  },
 
   beamStage: 'idle',
   beamStartNodeId: null,
@@ -84,5 +96,6 @@ export const useEditorStore = create<EditorState>((set) => ({
       beamStage: 'idle',
       beamStartNodeId: null,
       depthOverrideVector: null,
+      hoveredNodeId: null,
     }),
 }))

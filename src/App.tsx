@@ -7,6 +7,7 @@ import EditorUI from './components/EditorUI'
 import PlacementPlane from './components/PlacementPlane'
 import GhostPreview from './components/GhostPreview'
 import GhostBeamPreview from './components/GhostBeamPreview'
+import PhysicsLoop from './components/PhysicsLoop'
 
 function Scene() {
   return (
@@ -67,6 +68,7 @@ export default function App() {
       >
         <Scene />
         <NetworkRenderer />
+        <PhysicsLoop />
         <PlacementPlane ghostPointRef={ghostPointRef} />
         <GhostPreview ghostPointRef={ghostPointRef} />
         <GhostBeamPreview ghostPointRef={ghostPointRef} />

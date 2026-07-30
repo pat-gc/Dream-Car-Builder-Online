@@ -10,6 +10,7 @@ import {
 export interface NetworkStoreState {
   networkState: NetworkState
 
+  setNetworkState: (state: NetworkState) => void
   commitBeamStart: (position: THREE.Vector3) => string
   commitBeamEnd: (
     position: THREE.Vector3,
@@ -20,6 +21,8 @@ export interface NetworkStoreState {
 
 export const useNetworkStore = create<NetworkStoreState>((set, get) => ({
   networkState: createNetworkState(),
+
+  setNetworkState: (state) => set({ networkState: state }),
 
   commitBeamStart: (position) => {
     const state = get().networkState

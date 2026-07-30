@@ -37,6 +37,13 @@ export default function PlacementPlane({ ghostPointRef }: PlacementPlaneProps) {
       return
     }
 
+    const state = useEditorStore.getState()
+    const active = !state.isSimulating && state.mode === 'ADD_BEAM'
+    mesh.visible = active
+    if (!active) {
+      return
+    }
+
     camera.getWorldDirection(temp.worldDir)
     if (temp.worldDir.lengthSq() < 1e-12) {
       return
@@ -89,6 +96,10 @@ export default function PlacementPlane({ ghostPointRef }: PlacementPlaneProps) {
   function handlePointerMove(e: ThreeEvent<PointerEvent>) {
     e.stopPropagation()
 
+    if (useEditorStore.getState().isSimulating) {
+      return
+    }
+
     if (
       useEditorStore.getState().hoveredNodeId !== null &&
       useEditorStore.getState().hoveredNodeId !== undefined
@@ -134,6 +145,9 @@ export default function PlacementPlane({ ghostPointRef }: PlacementPlaneProps) {
     e.stopPropagation()
 
     const state = useEditorStore.getState()
+    if (state.isSimulating) {
+      return
+    }
     if (state.mode !== 'ADD_BEAM') {
       return
     }

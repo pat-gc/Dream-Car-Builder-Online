@@ -1,11 +1,10 @@
 import { useEffect } from 'react'
 import { useEditorStore, type EditorMode } from '../store/editorStore'
 
-const MODE_BUTTONS: { mode: EditorMode; label: string }[] = [
+const MODE_BUTTONS: { mode: Exclude<EditorMode, 'SIMULATE'>; label: string }[] = [
   { mode: 'ADD_BEAM', label: 'Add Beam' },
   { mode: 'SELECT_MOVE', label: 'Select/Move' },
   { mode: 'DELETE', label: 'Delete' },
-  { mode: 'SIMULATE', label: 'Simulate' },
 ]
 
 const SNAP_OPTIONS = [
@@ -20,27 +19,37 @@ const SNAP_OPTIONS = [
 function ModeToolbar() {
   const mode = useEditorStore((s) => s.mode)
   const setMode = useEditorStore((s) => s.setMode)
+  const isSimulating = useEditorStore((s) => s.isSimulating)
+  const toggleSimulation = useEditorStore((s) => s.toggleSimulation)
 
   return (
     <div style={styles.toolbarRow}>
       {MODE_BUTTONS.map((btn) => {
-        const active = mode === btn.mode
-        const handleSimulate = btn.mode === 'SIMULATE' ? () => {
-          if (!active) setMode('SIMULATE')
-        } : () => setMode(btn.mode)
+        const active = !isSimulating && mode === btn.mode
         return (
           <button
             key={btn.mode}
-            onClick={handleSimulate}
+            disabled={isSimulating}
+            onClick={() => setMode(btn.mode)}
             style={{
               ...styles.modeButton,
               ...(active ? styles.modeButtonActive : {}),
+              ...(isSimulating ? styles.modeButtonDisabled : {}),
             }}
           >
             {btn.label}
           </button>
         )
       })}
+      <button
+        onClick={toggleSimulation}
+        style={{
+          ...styles.modeButton,
+          ...(isSimulating ? styles.modeButtonStopActive : styles.modeButtonActive),
+        }}
+      >
+        {isSimulating ? 'Stop' : 'Simulate'}
+      </button>
     </div>
   )
 }
@@ -133,6 +142,16 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'rgba(90, 120, 255, 0.35)',
     border: '1px solid rgba(90, 120, 255, 0.7)',
     color: '#fff',
+  },
+  modeButtonStopActive: {
+    background: 'rgba(255, 80, 80, 0.35)',
+    border: '1px solid rgba(255, 80, 80, 0.7)',
+    color: '#fff',
+    cursor: 'pointer',
+  },
+  modeButtonDisabled: {
+    opacity: 0.45,
+    cursor: 'not-allowed',
   },
   controlsRow: {
     display: 'flex',

@@ -30,6 +30,37 @@ function cloneState(state: NetworkState): NetworkState {
   }
 }
 
+export function cloneNetworkState(state: NetworkState): NetworkState {
+  const nodes = new Map<string, Node3D>()
+  for (const [id, node] of state.nodes) {
+    nodes.set(id, {
+      id: node.id,
+      position: node.position.clone(),
+      velocity: node.velocity.clone(),
+      force: node.force.clone(),
+      mass: node.mass,
+      isFixed: node.isFixed,
+    })
+  }
+  const beams = new Map<string, Beam3D>()
+  for (const [id, beam] of state.beams) {
+    beams.set(id, { ...beam })
+  }
+  return { nodes, beams }
+}
+
+export function resetKinematics(state: NetworkState): NetworkState {
+  const next = cloneNetworkState(state)
+  for (const node of next.nodes.values()) {
+    node.velocity.set(0, 0, 0)
+    node.force.set(0, 0, 0)
+  }
+  for (const beam of next.beams.values()) {
+    beam.currentStress = 0
+  }
+  return next
+}
+
 export function addNode(
   state: NetworkState,
   position: THREE.Vector3,

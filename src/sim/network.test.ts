@@ -10,6 +10,8 @@ import {
   getTotalMass,
   findBeamBetween,
   createNetworkState,
+  cloneNetworkState,
+  resetKinematics,
 } from './network'
 import type { NetworkState } from './network'
 
@@ -246,5 +248,87 @@ describe('getTotalMass', () => {
 
   it('returns 0 for an empty network', () => {
     expect(getTotalMass(state)).toBe(0)
+  })
+})
+
+describe('cloneNetworkState', () => {
+  it('deep-clones nodes and beams so mutating the clone does not affect the source', () => {
+    let s = createNetworkState()
+    const rn1 = addNode(s, new THREE.Vector3(0, 1, 0), 2)
+    s = rn1.state
+    const rn2 = addNode(s, new THREE.Vector3(0, 2, 0), 3, true)
+    s = rn2.state
+    const rb = addBeam(s, rn1.node.id, rn2.node.id)
+    s = rb!.state
+
+    const clone = cloneNetworkState(s)
+    const cloneNode = clone.nodes.get(rn1.node.id)!
+    cloneNode.position.set(9, 9, 9)
+    cloneNode.velocity.set(5, 5, 5)
+    clone.beams.get(rb!.beam.id)!.currentStress = 123.45
+
+    const srcNode = s.nodes.get(rn1.node.id)!
+    expect(srcNode.position.equals(new THREE.Vector3(0, 1, 0))).toBe(true)
+    expect(srcNode.velocity.length()).toBe(0)
+    expect(s.beams.get(rb!.beam.id)!.currentStress).toBe(0)
+  })
+
+  it('preserves mass, isFixed, and beam scalar fields', () => {
+    let s = createNetworkState()
+    const rn1 = addNode(s, new THREE.Vector3(0, 0, 0), 7, true)
+    s = rn1.state
+    const rn2 = addNode(s, new THREE.Vector3(2, 0, 0))
+    s = rn2.state
+    const rb = addBeam(s, rn1.node.id, rn2.node.id)
+    s = rb!.state
+
+    const clone = cloneNetworkState(s)
+    const n1 = clone.nodes.get(rn1.node.id)!
+    const n2 = clone.nodes.get(rn2.node.id)!
+    expect(n1.mass).toBe(7)
+    expect(n1.isFixed).toBe(true)
+    expect(n2.isFixed).toBe(false)
+    const beam = clone.beams.get(rb!.beam.id)!
+    expect(beam.restLength).toBeCloseTo(2, 10)
+    expect(beam.stiffness).toBe(1000)
+    expect(beam.damping).toBe(10)
+  })
+})
+
+describe('resetKinematics', () => {
+  it('zeros velocities and forces and currentStress without moving positions', () => {
+    let s = createNetworkState()
+    const rn1 = addNode(s, new THREE.Vector3(0, 5, 0), 2)
+    s = rn1.state
+    const rn2 = addNode(s, new THREE.Vector3(0, 6, 0))
+    s = rn2.state
+    const rb = addBeam(s, rn1.node.id, rn2.node.id)
+    s = rb!.state
+
+    const n1 = s.nodes.get(rn1.node.id)!
+    n1.velocity.set(2, 2, 2)
+    n1.force.set(3, 3, 3)
+    s.beams.get(rb!.beam.id)!.currentStress = 999
+
+    const reset = resetKinematics(s)
+    const rn1After = reset.nodes.get(rn1.node.id)!
+    expect(rn1After.position.equals(new THREE.Vector3(0, 5, 0))).toBe(true)
+    expect(rn1After.velocity.length()).toBe(0)
+    expect(rn1After.force.length()).toBe(0)
+    expect(reset.beams.get(rb!.beam.id)!.currentStress).toBe(0)
+  })
+
+  it('returns a fully detached clone (original left untouched)', () => {
+    let s = createNetworkState()
+    const rn1 = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = rn1.state
+    const n1 = s.nodes.get(rn1.node.id)!
+    n1.velocity.set(1, 2, 3)
+
+    const reset = resetKinematics(s)
+    const resetN1 = reset.nodes.get(rn1.node.id)!
+    resetN1.velocity.set(9, 9, 9)
+
+    expect(n1.velocity.equals(new THREE.Vector3(1, 2, 3))).toBe(true)
   })
 })
