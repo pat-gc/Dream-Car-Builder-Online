@@ -6,6 +6,7 @@ import { createNetworkState } from './sim/network'
 import type { NetworkState } from './sim/network'
 import NetworkRenderer from './components/NetworkRenderer'
 import EditorUI from './components/EditorUI'
+import PlacementPlane from './components/PlacementPlane'
 
 function Scene() {
   return (
@@ -66,6 +67,7 @@ export default function App() {
       >
         <Scene />
         <NetworkRenderer networkState={networkState} />
+        <PlacementPlane />
         <OrbitControls
           makeDefault
           mouseButtons={{
