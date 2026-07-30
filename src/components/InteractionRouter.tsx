@@ -4,7 +4,12 @@ import * as THREE from 'three'
 import { useEditorStore } from '../store/editorStore'
 import { useNetworkStore } from '../store/networkStore'
 import { sharedMeshRegistry } from '../sim/meshRegistry'
-import { getNearestBeamHit, getNearestNodeHit, raycastPlane } from '../sim/pointerRouter'
+import {
+  getNearestBeamHit,
+  getNearestNodeHit,
+  projectToScreen,
+  raycastPlane,
+} from '../sim/pointerRouter'
 import { snapToAxis, snapToIncrement } from '../sim/snap'
 import {
   makeBeamTransformCache,
@@ -15,17 +20,20 @@ import {
 interface InteractionRouterProps {
   planeMeshRef: MutableRefObject<THREE.Object3D | null>
   ghostPointRef: MutableRefObject<THREE.Vector3 | null>
+  marqueeDivRef: MutableRefObject<HTMLDivElement | null>
 }
 
 const temp = {
   snapped: new THREE.Vector3(),
   startPos: new THREE.Vector3(),
   axisSnapped: new THREE.Vector3(),
+  delta: new THREE.Vector3(),
 }
 
 export default function InteractionRouter({
   planeMeshRef,
   ghostPointRef,
+  marqueeDivRef,
 }: InteractionRouterProps) {
   const { gl, camera, controls } = useThree()
 
@@ -43,6 +51,20 @@ export default function InteractionRouter({
   const dragStartPosRef = useRef<THREE.Vector3 | null>(null)
   const draggedIdBeforeClearRef = useRef<string | null>(null)
   const committedRef = useRef<boolean>(false)
+
+  // Group-drag state: maps selected nodeId -> start world position (store snapshot).
+  const groupStartPositionsRef = useRef<Map<string, THREE.Vector3>>(new Map())
+  // Grab plane-point at pointerdown for the group (single anchor for delta calc).
+  const groupGrabPlanePointRef = useRef<THREE.Vector3 | null>(null)
+  // Cached move targets reused across pointermove frames and the final commit.
+  const groupMoveTargetsRef = useRef<Map<string, THREE.Vector3>>(new Map())
+
+  // Marquee live rectangle in canvas-relative pixels.
+  const marqueeStartRef = useRef<{ x: number; y: number } | null>(null)
+  const marqueeActiveRef = useRef<boolean>(false)
+  // Tracks whether last pointerdown→up was a real drag (so the synthetic
+  // `click` handler can skip re-selection logic).
+  const hadRealDragRef = useRef<boolean>(false)
 
   useEffect(() => {
     const dom = snapshot.domElement
@@ -80,6 +102,27 @@ export default function InteractionRouter({
       })
     }
 
+    function collectConnectedBeamsForGroup(nodeIds: Iterable<string>): Set<string> {
+      const result = new Set<string>()
+      const beams = useNetworkStore.getState().networkState.beams
+      beams.forEach((beam, beamId) => {
+        if (
+          isIdInSet(nodeIds, beam.nodeAId) ||
+          isIdInSet(nodeIds, beam.nodeBId)
+        ) {
+          result.add(beamId)
+        }
+      })
+      return result
+    }
+
+    function isIdInSet(ids: Iterable<string>, id: string): boolean {
+      for (const n of ids) {
+        if (n === id) return true
+      }
+      return false
+    }
+
     function nodeStorePosition(nodeId: string): THREE.Vector3 | null {
       const node = useNetworkStore.getState().networkState.nodes.get(nodeId)
       return node === undefined ? null : node.position
@@ -112,6 +155,36 @@ export default function InteractionRouter({
       }
     }
 
+    function writeGroupFrame(
+      nodeIds: string[],
+      positionsById: Map<string, THREE.Vector3>,
+      connectedBeamIds: Set<string>,
+    ): void {
+      const cache = beamCacheRef.current
+      const beams = useNetworkStore.getState().networkState.beams
+      for (const id of nodeIds) {
+        const mesh = sharedMeshRegistry.nodeMeshes.get(id)
+        const pos = positionsById.get(id)
+        if (mesh === undefined || pos === undefined) continue
+        mesh.position.copy(pos)
+      }
+      for (const beamId of connectedBeamIds) {
+        const beam = beams.get(beamId)
+        if (beam === undefined) continue
+        const aPos = positionsById.get(beam.nodeAId)
+        const bPos = positionsById.get(beam.nodeBId)
+        if (aPos !== undefined && bPos !== undefined) {
+          writeBeamTransform(beamId, aPos, bPos, cache)
+        } else {
+          const fallA = aPos ?? nodeStorePosition(beam.nodeAId)
+          const fallB = bPos ?? nodeStorePosition(beam.nodeBId)
+          if (fallA !== null && fallB !== null) {
+            writeBeamTransform(beamId, fallA, fallB, cache)
+          }
+        }
+      }
+    }
+
     function restoreNodeImperatively(nodeId: string): void {
       const storePos = nodeStorePosition(nodeId)
       if (storePos === null) return
@@ -133,15 +206,124 @@ export default function InteractionRouter({
       }
     }
 
+    function restoreGroupImperatively(nodeIds: string[]): void {
+      const positions = new Map<string, THREE.Vector3>()
+      for (const id of nodeIds) {
+        const storePos = nodeStorePosition(id)
+        if (storePos !== null) positions.set(id, storePos)
+      }
+      const connectedBeams = collectConnectedBeamsForGroup(nodeIds)
+      writeGroupFrame(nodeIds, positions, connectedBeams)
+    }
+
     function setControlsEnabled(value: boolean): void {
       if (controlsImpl !== null && controlsImpl !== undefined) {
         controlsImpl.enabled = value
       }
     }
 
+    function canvasCoords(e: PointerEvent | MouseEvent): { x: number; y: number } {
+      const rect = dom.getBoundingClientRect()
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    }
+
+    function updateMarqueeRect(
+      startX: number,
+      startY: number,
+      curX: number,
+      curY: number,
+    ): void {
+      const div = marqueeDivRef.current
+      if (div === null) return
+      const left = Math.min(startX, curX)
+      const top = Math.min(startY, curY)
+      const width = Math.abs(curX - startX)
+      const height = Math.abs(curY - startY)
+      div.style.display = width > 1 || height > 1 ? 'block' : 'none'
+      div.style.left = `${left}px`
+      div.style.top = `${top}px`
+      div.style.width = `${width}px`
+      div.style.height = `${height}px`
+    }
+
+    function hideMarquee(): void {
+      const div = marqueeDivRef.current
+      if (div !== null) {
+        div.style.display = 'none'
+      }
+      marqueeStartRef.current = null
+      marqueeActiveRef.current = false
+    }
+
+    function computeMarqueeSelection(
+      startX: number,
+      startY: number,
+      curX: number,
+      curY: number,
+    ): string[] {
+      const rect = dom.getBoundingClientRect()
+      const minX = Math.min(startX, curX)
+      const maxX = Math.max(startX, curX)
+      const minY = Math.min(startY, curY)
+      const maxY = Math.max(startY, curY)
+      const cam = snapshot.camera
+      const selected: string[] = []
+      useNetworkStore.getState().networkState.nodes.forEach((node) => {
+        const p = projectToScreen(cam, node.position, rect)
+        const lx = p.x - rect.left
+        const ly = p.y - rect.top
+        if (lx >= minX && lx <= maxX && ly >= minY && ly <= maxY) {
+          selected.push(node.id)
+        }
+      })
+      return selected
+    }
+
     function onPointerMove(e: PointerEvent) {
       const s = useEditorStore.getState()
 
+      // --- Active group drag ---
+      if (
+        s.mode === 'SELECT_MOVE' &&
+        s.draggedNodeId !== null &&
+        s.draggedNodeId !== undefined &&
+        groupStartPositionsRef.current.size >= 2
+      ) {
+        const planeMesh = planeMeshRef.current
+        if (planeMesh === null) return
+        const rect = dom.getBoundingClientRect()
+        const planePoint = raycastPlane(
+          planeMesh,
+          snapshot.camera,
+          e.clientX,
+          e.clientY,
+          rect,
+        )
+        if (planePoint === null) return
+        const grab = groupGrabPlanePointRef.current
+        if (grab === null) return
+        temp.delta.subVectors(planePoint, grab)
+        const inc = s.snapIncrement
+        const moveTargets = groupMoveTargetsRef.current
+        moveTargets.clear()
+        let anyMoved = false
+        const nodeIds: string[] = []
+        for (const [id, start] of groupStartPositionsRef.current) {
+          const nx = snapToIncrement(start.x + temp.delta.x, inc)
+          const ny = snapToIncrement(start.y + temp.delta.y, inc)
+          const nz = snapToIncrement(start.z + temp.delta.z, inc)
+          temp.snapped.set(nx, ny, nz)
+          moveTargets.set(id, temp.snapped.clone())
+          nodeIds.push(id)
+          if (!anyMoved && !start.equals(temp.snapped)) anyMoved = true
+        }
+        const connectedBeams = collectConnectedBeamsForGroup(nodeIds)
+        writeGroupFrame(nodeIds, moveTargets, connectedBeams)
+        if (anyMoved) hadRealDragRef.current = true
+        return
+      }
+
+      // --- Active single-node drag ---
       if (
         s.mode === 'SELECT_MOVE' &&
         s.draggedNodeId !== null &&
@@ -166,6 +348,21 @@ export default function InteractionRouter({
         )
         dragCurrentPosRef.current.copy(temp.snapped)
         writeDraggedFrame(s.draggedNodeId, temp.snapped)
+        if (!hadRealDragRef.current && dragStartPosRef.current !== null) {
+          if (!dragStartPosRef.current.equals(temp.snapped)) {
+            hadRealDragRef.current = true
+          }
+        }
+        return
+      }
+
+      // --- Active marquee drag ---
+      if (marqueeActiveRef.current && activeForSelectMove()) {
+        const { x, y } = canvasCoords(e)
+        const start = marqueeStartRef.current
+        if (start === null) return
+        updateMarqueeRect(start.x, start.y, x, y)
+        hadRealDragRef.current = true
         return
       }
 
@@ -269,6 +466,8 @@ export default function InteractionRouter({
 
     function onPointerDown(e: PointerEvent) {
       if (e.button !== 0) return
+      hadRealDragRef.current = false
+
       if (!activeForSelectMove()) return
 
       const s = useEditorStore.getState()
@@ -284,11 +483,63 @@ export default function InteractionRouter({
         rect,
         sharedMeshRegistry.nodeMeshes,
       )
-      if (nodeHit === null) return
+
+      const screen = canvasCoords(e)
+
+      if (nodeHit === null) {
+        // Empty space: begin marquee.
+        marqueeStartRef.current = { x: screen.x, y: screen.y }
+        marqueeActiveRef.current = true
+        updateMarqueeRect(screen.x, screen.y, screen.x, screen.y)
+        return
+      }
 
       const storePos = nodeStorePosition(nodeHit.nodeId)
       if (storePos === null) return
 
+      const selection = useEditorStore.getState().selectedNodeIds
+      const isMultiGroup =
+        selection.size >= 2 && selection.has(nodeHit.nodeId)
+
+      if (isMultiGroup) {
+        // Group drag: snapshot all selected nodes' start positions.
+        groupStartPositionsRef.current.clear()
+        selection.forEach((id) => {
+          const pos = nodeStorePosition(id)
+          if (pos !== null) groupStartPositionsRef.current.set(id, pos.clone())
+        })
+        groupMoveTargetsRef.current.clear()
+        const planeMesh = planeMeshRef.current
+        let grabPlanePoint: THREE.Vector3 | null = null
+        if (planeMesh !== null) {
+          grabPlanePoint = raycastPlane(
+            planeMesh,
+            snapshot.camera,
+            e.clientX,
+            e.clientY,
+            rect,
+          )
+        }
+        groupGrabPlanePointRef.current = grabPlanePoint
+        committedRef.current = false
+        draggedIdBeforeClearRef.current = nodeHit.nodeId
+        useEditorStore.getState().setDraggedNodeId(nodeHit.nodeId, {
+          x: storePos.x,
+          y: storePos.y,
+          z: storePos.z,
+        })
+        setControlsEnabled(false)
+        try {
+          dom.setPointerCapture(e.pointerId)
+        } catch {
+          // ignore
+        }
+        return
+      }
+
+      // Single-node ready-to-drag (existing Step 11 flow).
+      groupStartPositionsRef.current.clear()
+      groupMoveTargetsRef.current.clear()
       committedRef.current = false
       draggedIdBeforeClearRef.current = nodeHit.nodeId
       dragStartPosRef.current = storePos.clone()
@@ -310,15 +561,90 @@ export default function InteractionRouter({
 
     function onPointerUp(e: PointerEvent) {
       const s = useEditorStore.getState()
+
+      // --- Marquee drag end ---
+      if (marqueeActiveRef.current) {
+        const start = marqueeStartRef.current
+        const cur = canvasCoords(e)
+        const { shiftKey } = e
+        let selectionResult: string[] = []
+        if (start !== null) {
+          selectionResult = computeMarqueeSelection(start.x, start.y, cur.x, cur.y)
+        }
+        if (hadRealDragRef.current && start !== null) {
+          const store = useEditorStore.getState()
+          if (shiftKey) {
+            const next = new Set(store.selectedNodeIds)
+            for (const id of selectionResult) next.add(id)
+            store.setSelection(Array.from(next))
+          } else {
+            store.setSelection(selectionResult)
+          }
+        }
+        hideMarquee()
+        return
+      }
+
+      if (s.mode !== 'SELECT_MOVE') return
       if (s.draggedNodeId === null || s.draggedNodeId === undefined) {
         return
       }
+
+      const isGroup = groupStartPositionsRef.current.size >= 2
+
+      if (!hadRealDragRef.current) {
+        // Treat as a click (no real movement): apply selection logic,
+        // discard the optimistic drag (no move to commit).
+        const nodeId = s.draggedNodeId
+        const { shiftKey } = e
+        const store = useEditorStore.getState()
+        if (shiftKey) {
+          store.toggleNodeSelection(nodeId)
+        } else {
+          store.setSelection([nodeId])
+        }
+        committedRef.current = true
+        groupStartPositionsRef.current.clear()
+        groupMoveTargetsRef.current.clear()
+        groupGrabPlanePointRef.current = null
+        dragStartPosRef.current = null
+        store.clearDraggedNode()
+        setControlsEnabled(true)
+        try {
+          dom.releasePointerCapture(e.pointerId)
+        } catch {
+          // ignore
+        }
+        return
+      }
+
+      if (isGroup) {
+        const moves = new Map<string, THREE.Vector3>()
+        for (const [id, pos] of groupMoveTargetsRef.current) {
+          moves.set(id, pos)
+        }
+        committedRef.current = true
+        useNetworkStore.getState().commitNodeMoves(moves)
+        useEditorStore.getState().clearDraggedNode()
+        groupStartPositionsRef.current.clear()
+        groupMoveTargetsRef.current.clear()
+        groupGrabPlanePointRef.current = null
+        setControlsEnabled(true)
+        try {
+          dom.releasePointerCapture(e.pointerId)
+        } catch {
+          // ignore
+        }
+        return
+      }
+
       const nodeId = s.draggedNodeId
       const finalPos = dragCurrentPosRef.current.clone()
 
       committedRef.current = true
       useNetworkStore.getState().commitNodeMove(nodeId, finalPos)
       useEditorStore.getState().clearDraggedNode()
+      dragStartPosRef.current = null
       setControlsEnabled(true)
       try {
         dom.releasePointerCapture(e.pointerId)
@@ -345,7 +671,25 @@ export default function InteractionRouter({
         return
       }
 
-      if (!activeForBuild()) return
+      if (!activeForBuild()) {
+        // SELECT_MOVE: selection is handled in pointerup (shift-click toggle,
+        // plain-click set, marquee box). Here we only clear selection when the
+        // click landed on empty space AND no marquee/node drag occurred.
+        if (activeForSelectMove() && !hadRealDragRef.current) {
+          const rect = dom.getBoundingClientRect()
+          const nodeHit = getNearestNodeHit(
+            snapshot.camera,
+            e.clientX,
+            e.clientY,
+            rect,
+            sharedMeshRegistry.nodeMeshes,
+          )
+          if (nodeHit === null) {
+            useEditorStore.getState().clearSelection()
+          }
+        }
+        return
+      }
 
       const s = useEditorStore.getState()
       if (s.draggedNodeId !== null && s.draggedNodeId !== undefined) {
@@ -461,10 +805,19 @@ export default function InteractionRouter({
       if (state.draggedNodeId === null || state.draggedNodeId === undefined) {
         draggedIdBeforeClearRef.current = null
         if (!committedRef.current) {
-          restoreNodeImperatively(id)
+          const groupIds = Array.from(groupStartPositionsRef.current.keys())
+          if (groupIds.length >= 2) {
+            restoreGroupImperatively(groupIds)
+          } else {
+            restoreNodeImperatively(id)
+          }
         }
         committedRef.current = false
         dragStartPosRef.current = null
+        groupStartPositionsRef.current.clear()
+        groupMoveTargetsRef.current.clear()
+        groupGrabPlanePointRef.current = null
+        hideMarquee()
         setControlsEnabled(true)
       }
     })
@@ -480,7 +833,7 @@ export default function InteractionRouter({
       dom.removeEventListener('click', onClick)
       unsubStore()
     }
-  }, [snapshot, planeMeshRef, ghostPointRef, controls])
+  }, [snapshot, planeMeshRef, ghostPointRef, marqueeDivRef, controls])
 
   return null
 }

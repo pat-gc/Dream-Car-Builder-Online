@@ -5,6 +5,7 @@ import {
   createNetworkState,
   findOrCreateNode,
   moveNode,
+  moveNodes,
   removeBeam,
   removeNode,
   type NetworkState,
@@ -21,6 +22,7 @@ export interface NetworkStoreState {
   ) => boolean
   commitBeamEndToNode: (endNodeId: string, startNodeId: string) => boolean
   commitNodeMove: (nodeId: string, position: THREE.Vector3) => void
+  commitNodeMoves: (moves: Map<string, THREE.Vector3>) => void
   deleteNode: (nodeId: string) => void
   deleteBeam: (beamId: string) => void
 }
@@ -79,6 +81,14 @@ export const useNetworkStore = create<NetworkStoreState>((set, get) => ({
     if (nodeId === null || nodeId === undefined) return
     const state = get().networkState
     const next = moveNode(state, nodeId, position)
+    set({ networkState: next })
+  },
+
+  commitNodeMoves: (moves) => {
+    if (moves.size === 0) return
+    const state = get().networkState
+    const next = moveNodes(state, moves)
+    if (next === state) return
     set({ networkState: next })
   },
 

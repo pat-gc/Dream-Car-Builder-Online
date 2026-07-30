@@ -9,6 +9,7 @@ import GhostPreview from './components/GhostPreview'
 import GhostBeamPreview from './components/GhostBeamPreview'
 import PhysicsLoop from './components/PhysicsLoop'
 import InteractionRouter from './components/InteractionRouter'
+import MarqueeOverlay from './components/MarqueeOverlay'
 
 function Scene() {
   return (
@@ -52,6 +53,7 @@ function Scene() {
 export default function App() {
   const ghostPointRef = useRef<THREE.Vector3 | null>(null)
   const planeMeshRef = useRef<THREE.Object3D | null>(null)
+  const marqueeDivRef = useRef<HTMLDivElement>(null)
 
   return (
     <div
@@ -77,6 +79,7 @@ export default function App() {
         <InteractionRouter
           planeMeshRef={planeMeshRef}
           ghostPointRef={ghostPointRef}
+          marqueeDivRef={marqueeDivRef}
         />
         <OrbitControls
           makeDefault
@@ -91,6 +94,7 @@ export default function App() {
           dampingFactor={0.1}
         />
       </Canvas>
+      <MarqueeOverlay marqueeDivRef={marqueeDivRef} />
       <EditorUI />
     </div>
   )

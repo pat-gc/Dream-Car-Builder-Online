@@ -41,6 +41,13 @@ export interface EditorState {
   clearDraggedNode: () => void
   cancelDrag: () => void
 
+  selectedNodeIds: Set<string>
+  selectNode: (id: string) => void
+  deselectNode: (id: string) => void
+  toggleNodeSelection: (id: string) => void
+  setSelection: (ids: string[]) => void
+  clearSelection: () => void
+
   setBeamStart: (nodeId: string, depth: DepthVector) => void
   resetBeamPlacement: () => void
   cancelBeamPlacement: () => void
@@ -55,6 +62,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       hoveredBeamId: null,
       draggedNodeId: null,
       depthOverrideVector: null,
+      selectedNodeIds: new Set<string>(),
     }),
 
   snapIncrement: 0.5,
@@ -76,6 +84,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       beamStartNodeId: null,
       depthOverrideVector: null,
       draggedNodeId: null,
+      selectedNodeIds: new Set<string>(),
     })
   },
 
@@ -117,6 +126,48 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   clearDraggedNode: () => set({ draggedNodeId: null, depthOverrideVector: null }),
   cancelDrag: () =>
     set({ draggedNodeId: null, depthOverrideVector: null, hoveredNodeId: null }),
+
+  selectedNodeIds: new Set<string>(),
+  selectNode: (id) => {
+    if (id === null || id === undefined) return
+    const current = useEditorStore.getState().selectedNodeIds
+    if (current.has(id)) return
+    const next = new Set(current)
+    next.add(id)
+    set({ selectedNodeIds: next })
+  },
+  deselectNode: (id) => {
+    if (id === null || id === undefined) return
+    const current = useEditorStore.getState().selectedNodeIds
+    if (!current.has(id)) return
+    const next = new Set(current)
+    next.delete(id)
+    set({ selectedNodeIds: next })
+  },
+  toggleNodeSelection: (id) => {
+    if (id === null || id === undefined) return
+    const current = useEditorStore.getState().selectedNodeIds
+    const next = new Set(current)
+    if (next.has(id)) {
+      next.delete(id)
+    } else {
+      next.add(id)
+    }
+    set({ selectedNodeIds: next })
+  },
+  setSelection: (ids) => {
+    const next = new Set<string>()
+    for (const id of ids) {
+      if (id !== null && id !== undefined) {
+        next.add(id)
+      }
+    }
+    set({ selectedNodeIds: next })
+  },
+  clearSelection: () => {
+    if (useEditorStore.getState().selectedNodeIds.size === 0) return
+    set({ selectedNodeIds: new Set<string>() })
+  },
 
   setBeamStart: (nodeId, depth) =>
     set({

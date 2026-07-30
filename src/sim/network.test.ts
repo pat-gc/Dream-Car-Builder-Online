@@ -5,6 +5,7 @@ import {
   addBeam,
   findOrCreateNode,
   moveNode,
+  moveNodes,
   removeNode,
   removeBeam,
   clear,
@@ -262,6 +263,129 @@ describe('moveNode', () => {
     const a = addNode(s, new THREE.Vector3(1, 2, 3))
     s = a.state
     expect(moveNode(s, a.node.id, new THREE.Vector3(1, 2, 3))).toBe(s)
+  })
+})
+
+describe('moveNodes', () => {
+  it('moves multiple nodes to their given targets without mutating the source', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(1, 0, 0))
+    s = b.state
+
+    const moves = new Map<string, THREE.Vector3>()
+    moves.set(a.node.id, new THREE.Vector3(5, 5, 5))
+    moves.set(b.node.id, new THREE.Vector3(6, 6, 6))
+    const after = moveNodes(s, moves)
+
+    expect(s.nodes.get(a.node.id)!.position.equals(new THREE.Vector3(0, 0, 0))).toBe(true)
+    expect(s.nodes.get(b.node.id)!.position.equals(new THREE.Vector3(1, 0, 0))).toBe(true)
+    expect(after.nodes.get(a.node.id)!.position.equals(new THREE.Vector3(5, 5, 5))).toBe(true)
+    expect(after.nodes.get(b.node.id)!.position.equals(new THREE.Vector3(6, 6, 6))).toBe(true)
+  })
+
+  it('recalculates restLength of beams between two moved nodes', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(3, 0, 0))
+    s = b.state
+    const ab = addBeam(s, a.node.id, b.node.id)
+    s = ab!.state
+    const beamId = ab!.beam.id
+    expect(s.beams.get(beamId)!.restLength).toBeCloseTo(3, 10)
+
+    const moves = new Map<string, THREE.Vector3>()
+    moves.set(a.node.id, new THREE.Vector3(0, 0, 0))
+    moves.set(b.node.id, new THREE.Vector3(6, 0, 0))
+    const after = moveNodes(s, moves)
+    expect(after.beams.get(beamId)!.restLength).toBeCloseTo(6, 10)
+  })
+
+  it('recalculates restLength of beams connecting a moved and an unmoved node', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(3, 0, 0))
+    s = b.state
+    const c = addNode(s, new THREE.Vector3(6, 0, 0))
+    s = c.state
+    const ab = addBeam(s, a.node.id, b.node.id)
+    s = ab!.state
+    const bc = addBeam(s, b.node.id, c.node.id)
+    s = bc!.state
+    const abId = ab!.beam.id
+    const bcId = bc!.beam.id
+
+    const moves = new Map<string, THREE.Vector3>()
+    moves.set(b.node.id, new THREE.Vector3(3, 4, 0))
+    const after = moveNodes(s, moves)
+
+    expect(after.beams.get(abId)!.restLength).toBeCloseTo(5, 10)
+    expect(after.beams.get(bcId)!.restLength).toBeCloseTo(5, 10)
+  })
+
+  it('does not change restLength of beams between two unmoved nodes', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(1, 0, 0))
+    s = b.state
+    const c = addNode(s, new THREE.Vector3(3, 0, 0))
+    s = c.state
+    const d = addNode(s, new THREE.Vector3(5, 0, 0))
+    s = d.state
+    const cd = addBeam(s, c.node.id, d.node.id)
+    s = cd!.state
+    const cdId = cd!.beam.id
+
+    const moves = new Map<string, THREE.Vector3>()
+    moves.set(a.node.id, new THREE.Vector3(9, 9, 9))
+    moves.set(b.node.id, new THREE.Vector3(8, 8, 8))
+    const after = moveNodes(s, moves)
+
+    expect(after.beams.get(cdId)!.restLength).toBeCloseTo(2, 10)
+  })
+
+  it('is a no-op returning the same state ref for an empty moves map', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    expect(moveNodes(s, new Map())).toBe(s)
+  })
+
+  it('is a no-op returning the same state ref when no node actually moves', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(1, 1, 1))
+    s = a.state
+    const moves = new Map<string, THREE.Vector3>()
+    moves.set(a.node.id, new THREE.Vector3(1, 1, 1))
+    expect(moveNodes(s, moves)).toBe(s)
+  })
+
+  it('skips unknown node ids without affecting the result', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const moves = new Map<string, THREE.Vector3>()
+    moves.set('nonexistent', new THREE.Vector3(9, 9, 9))
+    moves.set(a.node.id, new THREE.Vector3(2, 2, 2))
+    const after = moveNodes(s, moves)
+    expect(after.nodes.get(a.node.id)!.position.equals(new THREE.Vector3(2, 2, 2))).toBe(true)
+  })
+
+  it('deep-clones moved nodes so source nodes are untouched', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const moves = new Map<string, THREE.Vector3>()
+    moves.set(a.node.id, new THREE.Vector3(1, 0, 0))
+    const after = moveNodes(s, moves)
+    const movedNode = after.nodes.get(a.node.id)!
+
+    expect(movedNode).not.toBe(s.nodes.get(a.node.id)!)
+    expect(movedNode.position).not.toBe(s.nodes.get(a.node.id)!.position)
   })
 })
 

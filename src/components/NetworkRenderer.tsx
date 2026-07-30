@@ -21,10 +21,16 @@ const HOVER_COLOR_DELETE = '#ff3030'
 const BASE_COLOR_BEAM = '#aabbdd'
 const HOVER_COLOR_BEAM_DELETE = '#ff3030'
 
+const SELECTED_RING_COLOR = '#ffffff'
+const SELECTED_RING_RADIUS_SCALE = 1.35
+
 function NodeMesh({ node }: { node: Node3D }) {
-  const isHovered =
-    useEditorStore((s) => s.hoveredNodeId) === node.id
+  const hoveredNodeId = useEditorStore((s) => s.hoveredNodeId)
+  const selectedNodeIds = useEditorStore((s) => s.selectedNodeIds)
   const mode = useEditorStore((s) => s.mode)
+
+  const isHovered = hoveredNodeId === node.id
+  const isSelected = selectedNodeIds.has(node.id)
 
   const color = isHovered
     ? mode === 'SELECT_MOVE'
@@ -45,6 +51,20 @@ function NodeMesh({ node }: { node: Node3D }) {
     >
       <sphereGeometry args={[NODE_RADIUS, 24, 24]} />
       <meshStandardMaterial color={color} roughness={0.4} metalness={0.1} />
+      {isSelected ? (
+        <mesh>
+          <sphereGeometry
+            args={[NODE_RADIUS * SELECTED_RING_RADIUS_SCALE, 16, 16]}
+          />
+          <meshBasicMaterial
+            color={SELECTED_RING_COLOR}
+            wireframe
+            transparent
+            opacity={0.85}
+            depthWrite={false}
+          />
+        </mesh>
+      ) : null}
     </mesh>
   )
 }

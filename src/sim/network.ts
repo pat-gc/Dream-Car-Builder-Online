@@ -209,3 +209,48 @@ export function moveNode(
 
   return next
 }
+
+export function moveNodes(
+  state: NetworkState,
+  moves: Map<string, THREE.Vector3>,
+): NetworkState {
+  if (moves.size === 0) return state
+
+  const applied = new Map<string, THREE.Vector3>()
+  for (const [nodeId, targetPos] of moves) {
+    if (nodeId === null || nodeId === undefined) continue
+    const srcNode = state.nodes.get(nodeId)
+    if (srcNode === undefined) continue
+    if (srcNode.position.distanceToSquared(targetPos) < 1e-18) continue
+    applied.set(nodeId, targetPos)
+  }
+
+  if (applied.size === 0) return state
+
+  const next = cloneState(state)
+  for (const [nodeId, targetPos] of applied) {
+    const srcNode = state.nodes.get(nodeId) as Node3D
+    const moved: Node3D = {
+      ...srcNode,
+      position: targetPos.clone(),
+      velocity: srcNode.velocity.clone(),
+      force: srcNode.force.clone(),
+    }
+    next.nodes.set(nodeId, moved)
+  }
+
+  for (const [beamId, beam] of next.beams) {
+    if (!applied.has(beam.nodeAId) && !applied.has(beam.nodeBId)) {
+      continue
+    }
+    const a = next.nodes.get(beam.nodeAId)
+    const b = next.nodes.get(beam.nodeBId)
+    if (a === undefined || b === undefined) {
+      continue
+    }
+    const updated: Beam3D = { ...beam, restLength: a.position.distanceTo(b.position) }
+    next.beams.set(beamId, updated)
+  }
+
+  return next
+}

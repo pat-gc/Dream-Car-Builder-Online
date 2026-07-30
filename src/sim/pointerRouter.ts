@@ -109,3 +109,16 @@ export function raycastPlane(
   }
   return intersects[0].point.clone()
 }
+
+const sharedProjected = new THREE.Vector3()
+
+export function projectToScreen(
+  camera: THREE.Camera,
+  worldPoint: THREE.Vector3,
+  rect: DOMRect,
+): { x: number; y: number } {
+  sharedProjected.copy(worldPoint).project(camera)
+  const x = (sharedProjected.x * 0.5 + 0.5) * rect.width + rect.left
+  const y = (-sharedProjected.y * 0.5 + 0.5) * rect.height + rect.top
+  return { x, y }
+}
