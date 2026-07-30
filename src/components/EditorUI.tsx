@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useEditorStore, type EditorMode } from '../store/editorStore'
 
 const MODE_BUTTONS: { mode: EditorMode; label: string }[] = [
@@ -163,6 +164,20 @@ const styles: Record<string, React.CSSProperties> = {
 }
 
 export default function EditorUI() {
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Escape') {
+        return
+      }
+      const state = useEditorStore.getState()
+      if (state.beamStage === 'awaiting-second-point') {
+        state.cancelBeamPlacement()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   return (
     <div style={styles.overlayWrapper}>
       <div style={styles.panel}>

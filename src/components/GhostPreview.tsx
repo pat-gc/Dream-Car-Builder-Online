@@ -12,6 +12,7 @@ interface GhostPreviewProps {
 export default function GhostPreview({ ghostPointRef }: GhostPreviewProps) {
   const meshRef = useRef<THREE.Mesh>(null!)
   const mode = useEditorStore((s) => s.mode)
+  const beamStage = useEditorStore((s) => s.beamStage)
 
   useFrame(() => {
     const mesh = meshRef.current
@@ -19,9 +20,10 @@ export default function GhostPreview({ ghostPointRef }: GhostPreviewProps) {
       return
     }
 
-    const isAddBeam = mode === 'ADD_BEAM'
-    mesh.visible = isAddBeam
-    if (!isAddBeam) {
+    const isAddBeamIdle =
+      mode === 'ADD_BEAM' && beamStage === 'idle'
+    mesh.visible = isAddBeamIdle
+    if (!isAddBeamIdle) {
       return
     }
 

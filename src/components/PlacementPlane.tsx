@@ -2,22 +2,21 @@ import { useMemo, useRef, type MutableRefObject } from 'react'
 import { useThree, useFrame, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useEditorStore } from '../store/editorStore'
-import { snapToIncrement } from '../sim/snap'
+import { useNetworkStore } from '../store/networkStore'
+import { snapToIncrement, snapToAxis } from '../sim/snap'
 
 const PLANE_SIZE = 1000
 const PLANE_DEFAULT_NORMAL = new THREE.Vector3(0, 0, 1)
 
 interface PlacementPlaneProps {
-  depthOverride?: THREE.Vector3 | null
   ghostPointRef?: MutableRefObject<THREE.Vector3 | null>
 }
 
-export default function PlacementPlane({
-  depthOverride = null,
-  ghostPointRef,
-}: PlacementPlaneProps) {
+export default function PlacementPlane({ ghostPointRef }: PlacementPlaneProps) {
   const meshRef = useRef<THREE.Mesh>(null!)
   const { camera } = useThree()
+
+  const depthOverrideVector = useEditorStore((s) => s.depthOverrideVector)
 
   const temp = useMemo(
     () => ({
@@ -26,6 +25,8 @@ export default function PlacementPlane({
       depthPoint: new THREE.Vector3(),
       up: new THREE.Vector3(0, 1, 0),
       snapped: new THREE.Vector3(),
+      startPos: new THREE.Vector3(),
+      axisSnapped: new THREE.Vector3(),
     }),
     [],
   )
@@ -43,8 +44,12 @@ export default function PlacementPlane({
     temp.worldDir.normalize()
 
     temp.depthPoint.set(0, 0, 0)
-    if (depthOverride !== null && depthOverride !== undefined) {
-      temp.depthPoint.copy(depthOverride)
+    if (depthOverrideVector !== null && depthOverrideVector !== undefined) {
+      temp.depthPoint.set(
+        depthOverrideVector.x,
+        depthOverrideVector.y,
+        depthOverrideVector.z,
+      )
     }
 
     const dot = PLANE_DEFAULT_NORMAL.dot(temp.worldDir)
@@ -65,31 +70,53 @@ export default function PlacementPlane({
     mesh.updateMatrixWorld()
   })
 
-  function handlePointerMove(e: ThreeEvent<PointerEvent>) {
-    e.stopPropagation()
-
+  function writeSnappedHit(point: THREE.Vector3): THREE.Vector3 {
     const inc = useEditorStore.getState().snapIncrement
     temp.snapped.set(
-      snapToIncrement(e.point.x, inc),
-      snapToIncrement(e.point.y, inc),
-      snapToIncrement(e.point.z, inc),
+      snapToIncrement(point.x, inc),
+      snapToIncrement(point.y, inc),
+      snapToIncrement(point.z, inc),
     )
-
     if (ghostPointRef !== undefined) {
       if (ghostPointRef.current === null) {
         ghostPointRef.current = new THREE.Vector3()
       }
       ghostPointRef.current.copy(temp.snapped)
     }
+    return temp.snapped
+  }
 
-    const mode = useEditorStore.getState().mode
-    if (mode === 'ADD_BEAM') {
-      console.log(
-        '[PlacementPlane] snapped hit:',
-        temp.snapped.x.toFixed(3),
-        temp.snapped.y.toFixed(3),
-        temp.snapped.z.toFixed(3),
-      )
+  function handlePointerMove(e: ThreeEvent<PointerEvent>) {
+    e.stopPropagation()
+
+    writeSnappedHit(e.point)
+
+    const { mode, beamStage, beamStartNodeId, axisSnapEnabled } =
+      useEditorStore.getState()
+    if (mode !== 'ADD_BEAM') {
+      return
+    }
+    if (beamStage !== 'awaiting-second-point') {
+      return
+    }
+    if (beamStartNodeId === null || beamStartNodeId === undefined) {
+      return
+    }
+
+    const networkState = useNetworkStore.getState().networkState
+    const startNode = networkState.nodes.get(beamStartNodeId)
+    if (startNode === undefined) {
+      return
+    }
+    temp.startPos.copy(startNode.position)
+
+    if (axisSnapEnabled && ghostPointRef !== undefined) {
+      const current = ghostPointRef.current
+      if (current === null) {
+        return
+      }
+      temp.axisSnapped.copy(snapToAxis(temp.startPos, current))
+      current.copy(temp.axisSnapped)
     }
   }
 
@@ -98,6 +125,48 @@ export default function PlacementPlane({
       return
     }
     e.stopPropagation()
+
+    const state = useEditorStore.getState()
+    if (state.mode !== 'ADD_BEAM') {
+      return
+    }
+
+    if (state.beamStage === 'idle') {
+      const snapped = writeSnappedHit(e.point)
+      const { setBeamStart } = useEditorStore.getState()
+      const { commitBeamStart } = useNetworkStore.getState()
+      const startNodeId = commitBeamStart(snapped.clone())
+
+      const startNode =
+        useNetworkStore.getState().networkState.nodes.get(startNodeId)
+      if (startNode === undefined) {
+        return
+      }
+      setBeamStart(startNodeId, {
+        x: startNode.position.x,
+        y: startNode.position.y,
+        z: startNode.position.z,
+      })
+      return
+    }
+
+    if (state.beamStage === 'awaiting-second-point') {
+      const endPoint =
+        ghostPointRef !== undefined && ghostPointRef.current !== null
+          ? ghostPointRef.current.clone()
+          : writeSnappedHit(e.point).clone()
+
+      const { beamStartNodeId, resetBeamPlacement } = useEditorStore.getState()
+      if (beamStartNodeId === null || beamStartNodeId === undefined) {
+        return
+      }
+
+      const { commitBeamEnd } = useNetworkStore.getState()
+      const ok = commitBeamEnd(endPoint, beamStartNodeId)
+      if (ok) {
+        resetBeamPlacement()
+      }
+    }
   }
 
   return (

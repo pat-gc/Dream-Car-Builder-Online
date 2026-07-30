@@ -4,7 +4,7 @@ import type {
   Beam3D,
   Node3D,
 } from '../types/nodeGraph'
-import type { NetworkState } from '../sim/network'
+import { useNetworkStore } from '../store/networkStore'
 
 const UP = new THREE.Vector3(0, 1, 0)
 const NODE_RADIUS = 0.2
@@ -62,11 +62,9 @@ function BeamMesh({
   }, [a, b])
 }
 
-export default function NetworkRenderer({
-  networkState,
-}: {
-  networkState: NetworkState
-}) {
+export default function NetworkRenderer() {
+  const networkState = useNetworkStore((s) => s.networkState)
+
   const positions = useMemo(() => {
     const m = new Map<string, THREE.Vector3>()
     networkState.nodes.forEach((n) => m.set(n.id, n.position))

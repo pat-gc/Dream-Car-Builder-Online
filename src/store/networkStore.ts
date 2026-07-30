@@ -1,0 +1,48 @@
+import { create } from 'zustand'
+import * as THREE from 'three'
+import {
+  addBeam,
+  createNetworkState,
+  findOrCreateNode,
+  type NetworkState,
+} from '../sim/network'
+
+export interface NetworkStoreState {
+  networkState: NetworkState
+
+  commitBeamStart: (
+    position: THREE.Vector3,
+  ) => string
+  commitBeamEnd: (
+    position: THREE.Vector3,
+    startNodeId: string,
+  ) => boolean
+}
+
+export const useNetworkStore = create<NetworkStoreState>((set, get) => ({
+  networkState: createNetworkState(),
+
+  commitBeamStart: (position) => {
+    const state = get().networkState
+    const { state: next, nodeId } = findOrCreateNode(state, position)
+    set({ networkState: next })
+    return nodeId
+  },
+
+  commitBeamEnd: (position, startNodeId) => {
+    const state = get().networkState
+    const { state: next, nodeId: endNodeId } = findOrCreateNode(
+      state,
+      position,
+    )
+    if (endNodeId === startNodeId) {
+      return false
+    }
+    const result = addBeam(next, startNodeId, endNodeId)
+    if (result === null) {
+      return false
+    }
+    set({ networkState: result.state })
+    return true
+  },
+}))
