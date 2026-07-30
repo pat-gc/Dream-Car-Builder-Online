@@ -5,6 +5,8 @@ import {
   createNetworkState,
   findOrCreateNode,
   moveNode,
+  removeBeam,
+  removeNode,
   type NetworkState,
 } from '../sim/network'
 
@@ -19,6 +21,8 @@ export interface NetworkStoreState {
   ) => boolean
   commitBeamEndToNode: (endNodeId: string, startNodeId: string) => boolean
   commitNodeMove: (nodeId: string, position: THREE.Vector3) => void
+  deleteNode: (nodeId: string) => void
+  deleteBeam: (beamId: string) => void
 }
 
 export const useNetworkStore = create<NetworkStoreState>((set, get) => ({
@@ -75,6 +79,20 @@ export const useNetworkStore = create<NetworkStoreState>((set, get) => ({
     if (nodeId === null || nodeId === undefined) return
     const state = get().networkState
     const next = moveNode(state, nodeId, position)
+    set({ networkState: next })
+  },
+
+  deleteNode: (nodeId) => {
+    if (nodeId === null || nodeId === undefined) return
+    const state = get().networkState
+    const next = removeNode(state, nodeId)
+    set({ networkState: next })
+  },
+
+  deleteBeam: (beamId) => {
+    if (beamId === null || beamId === undefined) return
+    const state = get().networkState
+    const next = removeBeam(state, beamId)
     set({ networkState: next })
   },
 }))

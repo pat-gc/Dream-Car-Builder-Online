@@ -15,7 +15,33 @@ export function getNearestNodeHit(
   rect: DOMRect,
   nodeMeshes: Map<string, Object3D>,
 ): NodeHit | null {
-  if (nodeMeshes.size === 0) {
+  const id = getNearestIdHit(camera, clientX, clientY, rect, nodeMeshes)
+  return id === null ? null : { nodeId: id }
+}
+
+interface BeamHit {
+  beamId: string
+}
+
+export function getNearestBeamHit(
+  camera: THREE.Camera,
+  clientX: number,
+  clientY: number,
+  rect: DOMRect,
+  beamMeshes: Map<string, Object3D>,
+): BeamHit | null {
+  const id = getNearestIdHit(camera, clientX, clientY, rect, beamMeshes)
+  return id === null ? null : { beamId: id }
+}
+
+function getNearestIdHit(
+  camera: THREE.Camera,
+  clientX: number,
+  clientY: number,
+  rect: DOMRect,
+  meshesById: Map<string, Object3D>,
+): string | null {
+  if (meshesById.size === 0) {
     return null
   }
 
@@ -26,7 +52,7 @@ export function getNearestNodeHit(
 
   const reverse = new Map<Object3D, string>()
   const meshes: Object3D[] = []
-  nodeMeshes.forEach((obj, id) => {
+  meshesById.forEach((obj, id) => {
     if (obj !== null && obj !== undefined) {
       meshes.push(obj)
       reverse.set(obj, id)
@@ -48,15 +74,10 @@ export function getNearestNodeHit(
     }
   }
 
-  const nodeId = findNodeIdForMesh(reverse, nearest.object)
-  if (nodeId === null) {
-    return null
-  }
-
-  return { nodeId }
+  return findIdForMesh(reverse, nearest.object)
 }
 
-function findNodeIdForMesh(
+function findIdForMesh(
   reverse: Map<Object3D, string>,
   target: Object3D,
 ): string | null {

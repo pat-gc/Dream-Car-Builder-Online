@@ -4,6 +4,7 @@ import {
   addNode,
   addBeam,
   findOrCreateNode,
+  moveNode,
   removeNode,
   removeBeam,
   clear,
@@ -194,6 +195,73 @@ describe('removeNode', () => {
   it('is a no-op returning the same state ref for an unknown id', () => {
     const after = removeNode(state, 'nonexistent')
     expect(after).toBe(state)
+  })
+})
+
+describe('moveNode', () => {
+  it('deep-clones the moved node so the source node is not mutated', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(1, 0, 0))
+    s = b.state
+    const ab = addBeam(s, a.node.id, b.node.id)
+    s = ab!.state
+
+    const newPos = new THREE.Vector3(5, 5, 5)
+    const after = moveNode(s, a.node.id, newPos)
+
+    const srcNode = s.nodes.get(a.node.id)!
+    expect(srcNode.position.equals(new THREE.Vector3(0, 0, 0))).toBe(true)
+    const movedNode = after.nodes.get(a.node.id)!
+    expect(movedNode.position.equals(newPos)).toBe(true)
+    expect(movedNode).not.toBe(srcNode)
+  })
+
+  it('recalculates restLength of connected beams to the new distance', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(3, 0, 0))
+    s = b.state
+    const ab = addBeam(s, a.node.id, b.node.id)
+    s = ab!.state
+    const beamId = ab!.beam.id
+
+    const after = moveNode(s, a.node.id, new THREE.Vector3(6, 0, 0))
+    expect(after.beams.get(beamId)!.restLength).toBeCloseTo(3, 10)
+  })
+
+  it('does not change restLength of beams not connected to the moved node', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(2, 0, 0))
+    s = b.state
+    const c = addNode(s, new THREE.Vector3(4, 0, 0))
+    s = c.state
+    const ab = addBeam(s, a.node.id, b.node.id)
+    s = ab!.state
+    const bc = addBeam(s, b.node.id, c.node.id)
+    s = bc!.state
+    const bcId = bc!.beam.id
+
+    const after = moveNode(s, a.node.id, new THREE.Vector3(9, 9, 9))
+    expect(after.beams.get(bcId)!.restLength).toBeCloseTo(2, 10)
+  })
+
+  it('is a no-op returning the same state ref for an unknown id', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    expect(moveNode(s, 'nonexistent', new THREE.Vector3(1, 1, 1))).toBe(s)
+  })
+
+  it('returns the same state ref when the position is unchanged', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(1, 2, 3))
+    s = a.state
+    expect(moveNode(s, a.node.id, new THREE.Vector3(1, 2, 3))).toBe(s)
   })
 })
 

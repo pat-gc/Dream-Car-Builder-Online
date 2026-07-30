@@ -4,7 +4,7 @@ import * as THREE from 'three'
 import { useEditorStore } from '../store/editorStore'
 import { useNetworkStore } from '../store/networkStore'
 import { sharedMeshRegistry } from '../sim/meshRegistry'
-import { getNearestNodeHit, raycastPlane } from '../sim/pointerRouter'
+import { getNearestBeamHit, getNearestNodeHit, raycastPlane } from '../sim/pointerRouter'
 import { snapToAxis, snapToIncrement } from '../sim/snap'
 import {
   makeBeamTransformCache,
@@ -59,6 +59,13 @@ export default function InteractionRouter({
       const s = useEditorStore.getState()
       if (s.isSimulating) return false
       if (s.mode !== 'SELECT_MOVE') return false
+      return true
+    }
+
+    function activeForDelete(): boolean {
+      const s = useEditorStore.getState()
+      if (s.isSimulating) return false
+      if (s.mode !== 'DELETE') return false
       return true
     }
 
@@ -159,6 +166,50 @@ export default function InteractionRouter({
         )
         dragCurrentPosRef.current.copy(temp.snapped)
         writeDraggedFrame(s.draggedNodeId, temp.snapped)
+        return
+      }
+
+      if (activeForDelete()) {
+        const rect = dom.getBoundingClientRect()
+        const nodeHit = getNearestNodeHit(
+          snapshot.camera,
+          e.clientX,
+          e.clientY,
+          rect,
+          sharedMeshRegistry.nodeMeshes,
+        )
+        if (nodeHit !== null) {
+          const store = useEditorStore.getState()
+          store.setHoveredNodeId(nodeHit.nodeId)
+          if (store.hoveredBeamId !== null && store.hoveredBeamId !== undefined) {
+            store.clearHoveredBeamId()
+          }
+          return
+        }
+
+        const beamHit = getNearestBeamHit(
+          snapshot.camera,
+          e.clientX,
+          e.clientY,
+          rect,
+          sharedMeshRegistry.beamMeshes,
+        )
+        if (beamHit !== null) {
+          const store = useEditorStore.getState()
+          store.setHoveredBeamId(beamHit.beamId)
+          if (store.hoveredNodeId !== null && store.hoveredNodeId !== undefined) {
+            store.clearHoveredNodeId()
+          }
+          return
+        }
+
+        const store = useEditorStore.getState()
+        if (store.hoveredNodeId !== null && store.hoveredNodeId !== undefined) {
+          store.clearHoveredNodeId()
+        }
+        if (store.hoveredBeamId !== null && store.hoveredBeamId !== undefined) {
+          store.clearHoveredBeamId()
+        }
         return
       }
 
@@ -278,6 +329,22 @@ export default function InteractionRouter({
 
     function onClick(e: MouseEvent) {
       if (e.button !== 0) return
+
+      if (activeForDelete()) {
+        const state = useEditorStore.getState()
+        const network = useNetworkStore.getState()
+        const hoveredNodeId = state.hoveredNodeId
+        if (hoveredNodeId !== null && hoveredNodeId !== undefined) {
+          network.deleteNode(hoveredNodeId)
+          return
+        }
+        const hoveredBeamId = state.hoveredBeamId
+        if (hoveredBeamId !== null && hoveredBeamId !== undefined) {
+          network.deleteBeam(hoveredBeamId)
+        }
+        return
+      }
+
       if (!activeForBuild()) return
 
       const s = useEditorStore.getState()

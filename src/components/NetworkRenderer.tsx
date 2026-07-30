@@ -16,6 +16,10 @@ const BASE_COLOR_FREE = '#33eeff'
 const BASE_COLOR_FIXED = '#ff3355'
 const HOVER_COLOR_ADD_BEAM = '#ffea33'
 const HOVER_COLOR_SELECT_MOVE = '#ff8a1e'
+const HOVER_COLOR_DELETE = '#ff3030'
+
+const BASE_COLOR_BEAM = '#aabbdd'
+const HOVER_COLOR_BEAM_DELETE = '#ff3030'
 
 function NodeMesh({ node }: { node: Node3D }) {
   const isHovered =
@@ -25,7 +29,9 @@ function NodeMesh({ node }: { node: Node3D }) {
   const color = isHovered
     ? mode === 'SELECT_MOVE'
       ? HOVER_COLOR_SELECT_MOVE
-      : HOVER_COLOR_ADD_BEAM
+      : mode === 'DELETE'
+        ? HOVER_COLOR_DELETE
+        : HOVER_COLOR_ADD_BEAM
     : node.isFixed
       ? BASE_COLOR_FIXED
       : BASE_COLOR_FREE
@@ -53,7 +59,11 @@ function BeamMesh({
   const a = positions.get(beam.nodeAId)
   const b = positions.get(beam.nodeBId)
 
-  return useMemo(() => {
+  const isHovered =
+    useEditorStore((s) => s.hoveredBeamId) === beam.id &&
+    useEditorStore((s) => s.mode) === 'DELETE'
+
+  const geometry = useMemo(() => {
     if (a === undefined || b === undefined) return null
 
     const direction = new THREE.Vector3().subVectors(b, a)
@@ -67,20 +77,26 @@ function BeamMesh({
     )
     if (Number.isNaN(quaternion.x)) return null
 
-    return (
-      <mesh
-        ref={(obj) => sharedMeshRegistry.registerBeam(beam.id, obj)}
-        position={midpoint}
-        quaternion={quaternion}
-        scale={[1, length, 1]}
-        castShadow
-        receiveShadow
-      >
-        <cylinderGeometry args={[BEAM_RADIUS, BEAM_RADIUS, 1, 16]} />
-        <meshStandardMaterial color="#aabbdd" roughness={0.6} metalness={0.2} />
-      </mesh>
-    )
+    return { midpoint, quaternion, length }
   }, [a, b, beam.id])
+
+  if (geometry === null) return null
+
+  const color = isHovered ? HOVER_COLOR_BEAM_DELETE : BASE_COLOR_BEAM
+
+  return (
+    <mesh
+      ref={(obj) => sharedMeshRegistry.registerBeam(beam.id, obj)}
+      position={geometry.midpoint}
+      quaternion={geometry.quaternion}
+      scale={[1, geometry.length, 1]}
+      castShadow
+      receiveShadow
+    >
+      <cylinderGeometry args={[BEAM_RADIUS, BEAM_RADIUS, 1, 16]} />
+      <meshStandardMaterial color={color} roughness={0.6} metalness={0.2} />
+    </mesh>
+  )
 }
 
 export default function NetworkRenderer() {
