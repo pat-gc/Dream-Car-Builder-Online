@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/components/networkrenderer.tsx","./src/sim/network.test.ts","./src/sim/network.ts","./src/types/nodegraph.ts"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/editorui.tsx","./src/components/networkrenderer.tsx","./src/sim/network.test.ts","./src/sim/network.ts","./src/store/editorstore.ts","./src/types/nodegraph.ts"],"version":"5.9.3"}

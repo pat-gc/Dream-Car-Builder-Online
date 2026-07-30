@@ -2,42 +2,10 @@ import { useState } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Grid } from '@react-three/drei'
 import * as THREE from 'three'
-import { addNode, addBeam, createNetworkState } from './sim/network'
+import { createNetworkState } from './sim/network'
 import type { NetworkState } from './sim/network'
 import NetworkRenderer from './components/NetworkRenderer'
-
-function buildTestNetwork(): NetworkState {
-  let s = createNetworkState()
-  const n0 = addNode(s, new THREE.Vector3(0, 0, 0), 1, true)
-  s = n0.state
-  const n1 = addNode(s, new THREE.Vector3(3, 0, 0))
-  s = n1.state
-  const n2 = addNode(s, new THREE.Vector3(3, 0, 3))
-  s = n2.state
-  const n3 = addNode(s, new THREE.Vector3(0, 0, 3))
-  s = n3.state
-  const n4 = addNode(s, new THREE.Vector3(1.5, 2.5, 1.5))
-  s = n4.state
-
-  const b01 = addBeam(s, n0.node.id, n1.node.id)
-  s = b01!.state
-  const b12 = addBeam(s, n1.node.id, n2.node.id)
-  s = b12!.state
-  const b23 = addBeam(s, n2.node.id, n3.node.id)
-  s = b23!.state
-  const b30 = addBeam(s, n3.node.id, n0.node.id)
-  s = b30!.state
-  const b04 = addBeam(s, n0.node.id, n4.node.id)
-  s = b04!.state
-  const b14 = addBeam(s, n1.node.id, n4.node.id)
-  s = b14!.state
-  const b24 = addBeam(s, n2.node.id, n4.node.id)
-  s = b24!.state
-  const b34 = addBeam(s, n3.node.id, n4.node.id)
-  s = b34!.state
-
-  return s
-}
+import EditorUI from './components/EditorUI'
 
 function Scene() {
   return (
@@ -79,28 +47,39 @@ function Scene() {
 }
 
 export default function App() {
-  const [networkState] = useState<NetworkState>(() => buildTestNetwork())
+  const [networkState] = useState<NetworkState>(() => createNetworkState())
 
   return (
-    <Canvas
-      shadows
-      camera={{ position: [15, 12, 18], fov: 50, near: 0.1, far: 1000 }}
-      gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping }}
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100vw',
+        height: '100vh',
+      }}
     >
-      <Scene />
-      <NetworkRenderer networkState={networkState} />
-      <OrbitControls
-        makeDefault
-        mouseButtons={{
-          LEFT: undefined as never,
-          MIDDLE: THREE.MOUSE.DOLLY,
-          RIGHT: THREE.MOUSE.ROTATE,
-        }}
-        minPolarAngle={0}
-        maxPolarAngle={Math.PI}
-        enableDamping
-        dampingFactor={0.1}
-      />
-    </Canvas>
+      <Canvas
+        shadows
+        camera={{ position: [15, 12, 18], fov: 50, near: 0.1, far: 1000 }}
+        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping }}
+      >
+        <Scene />
+        <NetworkRenderer networkState={networkState} />
+        <OrbitControls
+          makeDefault
+          mouseButtons={{
+            LEFT: undefined as never,
+            MIDDLE: THREE.MOUSE.DOLLY,
+            RIGHT: THREE.MOUSE.ROTATE,
+          }}
+          minPolarAngle={0}
+          maxPolarAngle={Math.PI}
+          enableDamping
+          dampingFactor={0.1}
+        />
+      </Canvas>
+      <EditorUI />
+    </div>
   )
 }
