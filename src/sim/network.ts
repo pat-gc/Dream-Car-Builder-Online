@@ -175,3 +175,17 @@ export function findBeamBetween(
   }
   return undefined
 }
+
+export function moveNode(
+  state: NetworkState,
+  nodeId: string,
+  position: THREE.Vector3,
+): NetworkState {
+  const node = state.nodes.get(nodeId)
+  if (node === undefined) return state
+  const next = cloneState(state)
+  const moved = next.nodes.get(nodeId)
+  if (moved === undefined) return next
+  moved.position.copy(position)
+  return next
+}

@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import * as THREE from 'three'
 import { useEditorStore } from '../store/editorStore'
 import { useNetworkStore } from '../store/networkStore'
 import {
@@ -10,61 +9,16 @@ import {
 } from '../sim/network'
 import { stepPhysics } from '../sim/physics'
 import { sharedMeshRegistry } from '../sim/meshRegistry'
+import { makeBeamTransformCache, writeBeamTransform } from '../sim/beamTransform'
 
 const MAX_DELTA = 0.1
-const UP = new THREE.Vector3(0, 1, 0)
-
-interface CachedVecs {
-  axis: THREE.Vector3
-  midpoint: THREE.Vector3
-  quat: THREE.Quaternion
-  zero: THREE.Vector3
-}
-
-function makeCachedVecs(): CachedVecs {
-  return {
-    axis: new THREE.Vector3(),
-    midpoint: new THREE.Vector3(),
-    quat: new THREE.Quaternion(),
-    zero: new THREE.Vector3(0, 0, 0),
-  }
-}
-
-function writeBeamTransform(
-  beamId: string,
-  aPos: THREE.Vector3,
-  bPos: THREE.Vector3,
-  cache: CachedVecs,
-): void {
-  const mesh = sharedMeshRegistry.beamMeshes.get(beamId)
-  if (mesh === undefined) {
-    return
-  }
-  cache.axis.subVectors(bPos, aPos)
-  const length = cache.axis.length()
-  if (length < 1e-6) {
-    mesh.visible = false
-    return
-  }
-  cache.axis.divideScalar(length)
-  cache.midpoint.addVectors(aPos, bPos).multiplyScalar(0.5)
-  cache.quat.setFromUnitVectors(UP, cache.axis)
-  if (Number.isNaN(cache.quat.x)) {
-    mesh.visible = false
-    return
-  }
-  mesh.position.copy(cache.midpoint)
-  mesh.quaternion.copy(cache.quat)
-  mesh.scale.set(1, length, 1)
-  mesh.visible = true
-}
 
 export default function PhysicsLoop() {
   const isSimulatingRef = useRef(false)
   const wasSimulatingRef = useRef(false)
   const liveStateRef = useRef<NetworkState | null>(null)
   const snapshotRef = useRef<NetworkState | null>(null)
-  const cacheRef = useRef<CachedVecs>(makeCachedVecs())
+  const cacheRef = useRef(makeBeamTransformCache())
   const liveBeamIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {

@@ -4,6 +4,7 @@ import {
   addBeam,
   createNetworkState,
   findOrCreateNode,
+  moveNode,
   type NetworkState,
 } from '../sim/network'
 
@@ -17,6 +18,7 @@ export interface NetworkStoreState {
     startNodeId: string,
   ) => boolean
   commitBeamEndToNode: (endNodeId: string, startNodeId: string) => boolean
+  commitNodeMove: (nodeId: string, position: THREE.Vector3) => void
 }
 
 export const useNetworkStore = create<NetworkStoreState>((set, get) => ({
@@ -67,5 +69,12 @@ export const useNetworkStore = create<NetworkStoreState>((set, get) => ({
     }
     set({ networkState: result.state })
     return true
+  },
+
+  commitNodeMove: (nodeId, position) => {
+    if (nodeId === null || nodeId === undefined) return
+    const state = get().networkState
+    const next = moveNode(state, nodeId, position)
+    set({ networkState: next })
   },
 }))

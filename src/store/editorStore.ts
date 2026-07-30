@@ -32,6 +32,11 @@ export interface EditorState {
   setHoveredNodeId: (nodeId: string) => void
   clearHoveredNodeId: () => void
 
+  draggedNodeId: string | null
+  setDraggedNodeId: (nodeId: string, depth: DepthVector) => void
+  clearDraggedNode: () => void
+  cancelDrag: () => void
+
   setBeamStart: (nodeId: string, depth: DepthVector) => void
   resetBeamPlacement: () => void
   cancelBeamPlacement: () => void
@@ -39,7 +44,8 @@ export interface EditorState {
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   mode: 'ADD_BEAM',
-  setMode: (mode) => set({ mode, hoveredNodeId: null }),
+  setMode: (mode) =>
+    set({ mode, hoveredNodeId: null, draggedNodeId: null, depthOverrideVector: null }),
 
   snapIncrement: 0.5,
   setSnapIncrement: (value) => set({ snapIncrement: value }),
@@ -58,6 +64,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       beamStage: 'idle',
       beamStartNodeId: null,
       depthOverrideVector: null,
+      draggedNodeId: null,
     })
   },
 
@@ -76,6 +83,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ hoveredNodeId: nodeId })
   },
   clearHoveredNodeId: () => set({ hoveredNodeId: null }),
+
+  draggedNodeId: null,
+  setDraggedNodeId: (nodeId, depth) => {
+    if (nodeId === null || nodeId === undefined) {
+      return
+    }
+    set({ draggedNodeId: nodeId, depthOverrideVector: depth })
+  },
+  clearDraggedNode: () => set({ draggedNodeId: null, depthOverrideVector: null }),
+  cancelDrag: () =>
+    set({ draggedNodeId: null, depthOverrideVector: null, hoveredNodeId: null }),
 
   setBeamStart: (nodeId, depth) =>
     set({

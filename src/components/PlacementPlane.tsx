@@ -33,7 +33,12 @@ export default function PlacementPlane({ planeMeshRef }: PlacementPlaneProps) {
     }
 
     const state = useEditorStore.getState()
-    const active = !state.isSimulating && state.mode === 'ADD_BEAM'
+    const dragging =
+      state.mode === 'SELECT_MOVE' &&
+      state.draggedNodeId !== null &&
+      state.draggedNodeId !== undefined
+    const active =
+      !state.isSimulating && (state.mode === 'ADD_BEAM' || dragging)
     mesh.visible = active
     if (!active) {
       return

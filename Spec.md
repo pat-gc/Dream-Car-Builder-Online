@@ -157,7 +157,7 @@ maintained/extended as the project grows:
 9. PhysicsLoop component inside Canvas, Simulate/Stop toggle with state
    snapshot + reset. Follow the ref-based/imperative-sync pattern from the
    State Management section — no per-frame setState.
-10. Pinned/anchor nodes
+10. Pinned/anchor nodes  SKIP THIS
 11. SELECT_MOVE drag tool
 12. DELETE tool
 13. Multi-select (box + shift)

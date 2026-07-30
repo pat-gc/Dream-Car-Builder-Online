@@ -14,14 +14,18 @@ const BEAM_RADIUS = 0.06
 
 const BASE_COLOR_FREE = '#33eeff'
 const BASE_COLOR_FIXED = '#ff3355'
-const HOVER_COLOR = '#ffea33'
+const HOVER_COLOR_ADD_BEAM = '#ffea33'
+const HOVER_COLOR_SELECT_MOVE = '#ff8a1e'
 
 function NodeMesh({ node }: { node: Node3D }) {
   const isHovered =
     useEditorStore((s) => s.hoveredNodeId) === node.id
+  const mode = useEditorStore((s) => s.mode)
 
   const color = isHovered
-    ? HOVER_COLOR
+    ? mode === 'SELECT_MOVE'
+      ? HOVER_COLOR_SELECT_MOVE
+      : HOVER_COLOR_ADD_BEAM
     : node.isFixed
       ? BASE_COLOR_FIXED
       : BASE_COLOR_FREE

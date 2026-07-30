@@ -189,6 +189,10 @@ export default function EditorUI() {
         return
       }
       const state = useEditorStore.getState()
+      if (state.draggedNodeId !== null && state.draggedNodeId !== undefined) {
+        state.cancelDrag()
+        return
+      }
       if (state.beamStage === 'awaiting-second-point') {
         state.cancelBeamPlacement()
       }
