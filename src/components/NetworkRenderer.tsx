@@ -1,5 +1,4 @@
 import { useMemo } from 'react'
-import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import type {
   Beam3D,
@@ -17,66 +16,9 @@ const BASE_COLOR_FREE = '#33eeff'
 const BASE_COLOR_FIXED = '#ff3355'
 const HOVER_COLOR = '#ffea33'
 
-function interactionAllowed(): boolean {
-  const state = useEditorStore.getState()
-  if (state.isSimulating) {
-    return false
-  }
-  return true
-}
-
 function NodeMesh({ node }: { node: Node3D }) {
   const isHovered =
     useEditorStore((s) => s.hoveredNodeId) === node.id
-
-  function onPointerOver(e: ThreeEvent<PointerEvent>) {
-    if (!interactionAllowed()) return
-    if (useEditorStore.getState().mode !== 'ADD_BEAM') return
-    e.stopPropagation()
-    useEditorStore.getState().setHoveredNodeId(node.id)
-  }
-
-  function onPointerOut(e: ThreeEvent<PointerEvent>) {
-    if (useEditorStore.getState().mode !== 'ADD_BEAM') return
-    e.stopPropagation()
-    if (useEditorStore.getState().hoveredNodeId === node.id) {
-      useEditorStore.getState().clearHoveredNodeId()
-    }
-  }
-
-  function onPointerMove(e: ThreeEvent<PointerEvent>) {
-    if (!interactionAllowed()) return
-    if (useEditorStore.getState().mode !== 'ADD_BEAM') return
-    e.stopPropagation()
-    useEditorStore.getState().setHoveredNodeId(node.id)
-  }
-
-  function onClick(e: ThreeEvent<MouseEvent>) {
-    if (e.button !== 0) return
-    if (!interactionAllowed()) return
-    const state = useEditorStore.getState()
-    if (state.mode !== 'ADD_BEAM') return
-    e.stopPropagation()
-
-    if (state.beamStage === 'idle') {
-      state.setBeamStart(node.id, {
-        x: node.position.x,
-        y: node.position.y,
-        z: node.position.z,
-      })
-      return
-    }
-
-    if (state.beamStage === 'awaiting-second-point') {
-      const startId = state.beamStartNodeId
-      if (startId === null || startId === undefined) return
-      if (node.id === startId) return
-      const ok = useNetworkStore.getState().commitBeamEndToNode(node.id, startId)
-      if (ok) {
-        state.resetBeamPlacement()
-      }
-    }
-  }
 
   const color = isHovered
     ? HOVER_COLOR
@@ -88,10 +30,6 @@ function NodeMesh({ node }: { node: Node3D }) {
     <mesh
       ref={(obj) => sharedMeshRegistry.registerNode(node.id, obj)}
       position={node.position}
-      onPointerOver={onPointerOver}
-      onPointerOut={onPointerOut}
-      onPointerMove={onPointerMove}
-      onClick={onClick}
       castShadow
       receiveShadow
     >

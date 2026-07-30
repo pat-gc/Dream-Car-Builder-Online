@@ -8,6 +8,7 @@ import PlacementPlane from './components/PlacementPlane'
 import GhostPreview from './components/GhostPreview'
 import GhostBeamPreview from './components/GhostBeamPreview'
 import PhysicsLoop from './components/PhysicsLoop'
+import InteractionRouter from './components/InteractionRouter'
 
 function Scene() {
   return (
@@ -50,6 +51,7 @@ function Scene() {
 
 export default function App() {
   const ghostPointRef = useRef<THREE.Vector3 | null>(null)
+  const planeMeshRef = useRef<THREE.Object3D | null>(null)
 
   return (
     <div
@@ -69,9 +71,13 @@ export default function App() {
         <Scene />
         <NetworkRenderer />
         <PhysicsLoop />
-        <PlacementPlane ghostPointRef={ghostPointRef} />
+        <PlacementPlane planeMeshRef={planeMeshRef} />
         <GhostPreview ghostPointRef={ghostPointRef} />
         <GhostBeamPreview ghostPointRef={ghostPointRef} />
+        <InteractionRouter
+          planeMeshRef={planeMeshRef}
+          ghostPointRef={ghostPointRef}
+        />
         <OrbitControls
           makeDefault
           mouseButtons={{
