@@ -1,24 +1,103 @@
 import { useMemo } from 'react'
+import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import type {
   Beam3D,
   Node3D,
 } from '../types/nodeGraph'
 import { useNetworkStore } from '../store/networkStore'
+import { useEditorStore } from '../store/editorStore'
 
 const UP = new THREE.Vector3(0, 1, 0)
 const NODE_RADIUS = 0.2
 const BEAM_RADIUS = 0.06
 
+const BASE_COLOR_FREE = '#33eeff'
+const BASE_COLOR_FIXED = '#ff3355'
+const HOVER_COLOR = '#ffea33'
+
 function NodeMesh({ node }: { node: Node3D }) {
+  const isHovered =
+    useEditorStore((s) => s.hoveredNodeId) === node.id
+
+  function onPointerOver(e: ThreeEvent<PointerEvent>) {
+    if (useEditorStore.getState().mode !== 'ADD_BEAM') {
+      return
+    }
+    e.stopPropagation()
+    useEditorStore.getState().setHoveredNodeId(node.id)
+  }
+
+  function onPointerOut(e: ThreeEvent<PointerEvent>) {
+    if (useEditorStore.getState().mode !== 'ADD_BEAM') {
+      return
+    }
+    e.stopPropagation()
+    if (useEditorStore.getState().hoveredNodeId === node.id) {
+      useEditorStore.getState().clearHoveredNodeId()
+    }
+  }
+
+  function onPointerMove(e: ThreeEvent<PointerEvent>) {
+    if (useEditorStore.getState().mode !== 'ADD_BEAM') {
+      return
+    }
+    e.stopPropagation()
+    useEditorStore.getState().setHoveredNodeId(node.id)
+  }
+
+  function onClick(e: ThreeEvent<MouseEvent>) {
+    if (e.button !== 0) {
+      return
+    }
+    const state = useEditorStore.getState()
+    if (state.mode !== 'ADD_BEAM') {
+      return
+    }
+    e.stopPropagation()
+
+    if (state.beamStage === 'idle') {
+      state.setBeamStart(node.id, {
+        x: node.position.x,
+        y: node.position.y,
+        z: node.position.z,
+      })
+      return
+    }
+
+    if (state.beamStage === 'awaiting-second-point') {
+      const startId = state.beamStartNodeId
+      if (startId === null || startId === undefined) {
+        return
+      }
+      if (node.id === startId) {
+        return
+      }
+      const ok = useNetworkStore.getState().commitBeamEndToNode(node.id, startId)
+      if (ok) {
+        state.resetBeamPlacement()
+      }
+    }
+  }
+
+  const color = isHovered
+    ? HOVER_COLOR
+    : node.isFixed
+      ? BASE_COLOR_FIXED
+      : BASE_COLOR_FREE
+
   return (
-    <mesh position={node.position} castShadow receiveShadow>
+    <mesh
+      position={node.position}
+      onPointerOver={onPointerOver}
+      onPointerOut={onPointerOut}
+      onPointerMove={onPointerMove}
+      onClick={onClick}
+      castShadow
+      receiveShadow
+    >
       <sphereGeometry args={[NODE_RADIUS, 24, 24]} />
-      <meshStandardMaterial
-        color={node.isFixed ? '#ff3355' : '#33eeff'}
-        roughness={0.4}
-        metalness={0.1}
-      />
+      <meshStandardMaterial color={color} roughness={0.4} metalness={0.1} />
     </mesh>
   )
 }

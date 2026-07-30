@@ -10,13 +10,12 @@ import {
 export interface NetworkStoreState {
   networkState: NetworkState
 
-  commitBeamStart: (
-    position: THREE.Vector3,
-  ) => string
+  commitBeamStart: (position: THREE.Vector3) => string
   commitBeamEnd: (
     position: THREE.Vector3,
     startNodeId: string,
   ) => boolean
+  commitBeamEndToNode: (endNodeId: string, startNodeId: string) => boolean
 }
 
 export const useNetworkStore = create<NetworkStoreState>((set, get) => ({
@@ -39,6 +38,27 @@ export const useNetworkStore = create<NetworkStoreState>((set, get) => ({
       return false
     }
     const result = addBeam(next, startNodeId, endNodeId)
+    if (result === null) {
+      return false
+    }
+    set({ networkState: result.state })
+    return true
+  },
+
+  commitBeamEndToNode: (endNodeId, startNodeId) => {
+    if (
+      endNodeId === null ||
+      endNodeId === undefined ||
+      startNodeId === null ||
+      startNodeId === undefined
+    ) {
+      return false
+    }
+    if (endNodeId === startNodeId) {
+      return false
+    }
+    const state = get().networkState
+    const result = addBeam(state, startNodeId, endNodeId)
     if (result === null) {
       return false
     }

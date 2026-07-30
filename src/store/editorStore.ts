@@ -27,6 +27,10 @@ export interface EditorState {
   beamStartNodeId: string | null
   depthOverrideVector: DepthVector | null
 
+  hoveredNodeId: string | null
+  setHoveredNodeId: (nodeId: string) => void
+  clearHoveredNodeId: () => void
+
   setBeamStart: (nodeId: string, depth: DepthVector) => void
   resetBeamPlacement: () => void
   cancelBeamPlacement: () => void
@@ -48,6 +52,18 @@ export const useEditorStore = create<EditorState>((set) => ({
   beamStage: 'idle',
   beamStartNodeId: null,
   depthOverrideVector: null,
+
+  hoveredNodeId: null,
+  setHoveredNodeId: (nodeId) => {
+    if (nodeId === null || nodeId === undefined) {
+      return
+    }
+    if (useEditorStore.getState().hoveredNodeId === nodeId) {
+      return
+    }
+    set({ hoveredNodeId: nodeId })
+  },
+  clearHoveredNodeId: () => set({ hoveredNodeId: null }),
 
   setBeamStart: (nodeId, depth) =>
     set({

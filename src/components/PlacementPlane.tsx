@@ -89,6 +89,13 @@ export default function PlacementPlane({ ghostPointRef }: PlacementPlaneProps) {
   function handlePointerMove(e: ThreeEvent<PointerEvent>) {
     e.stopPropagation()
 
+    if (
+      useEditorStore.getState().hoveredNodeId !== null &&
+      useEditorStore.getState().hoveredNodeId !== undefined
+    ) {
+      return
+    }
+
     writeSnappedHit(e.point)
 
     const { mode, beamStage, beamStartNodeId, axisSnapEnabled } =
@@ -128,6 +135,13 @@ export default function PlacementPlane({ ghostPointRef }: PlacementPlaneProps) {
 
     const state = useEditorStore.getState()
     if (state.mode !== 'ADD_BEAM') {
+      return
+    }
+
+    if (
+      state.hoveredNodeId !== null &&
+      state.hoveredNodeId !== undefined
+    ) {
       return
     }
 

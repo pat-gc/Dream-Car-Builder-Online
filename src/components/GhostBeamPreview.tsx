@@ -20,6 +20,7 @@ export default function GhostBeamPreview({
 
   const beamStage = useEditorStore((s) => s.beamStage)
   const beamStartNodeId = useEditorStore((s) => s.beamStartNodeId)
+  const hoveredNodeId = useEditorStore((s) => s.hoveredNodeId)
   const networkState = useNetworkStore((s) => s.networkState)
 
   const temp = useMemo(
@@ -28,6 +29,7 @@ export default function GhostBeamPreview({
       midpoint: new THREE.Vector3(),
       quat: new THREE.Quaternion(),
       fallbackStart: new THREE.Vector3(),
+      effectiveEnd: new THREE.Vector3(),
     }),
     [],
   )
@@ -46,7 +48,21 @@ export default function GhostBeamPreview({
       return
     }
 
-    const end = ghostPointRef.current
+    let end: THREE.Vector3 | null = null
+    if (
+      hoveredNodeId !== null &&
+      hoveredNodeId !== undefined &&
+      hoveredNodeId !== beamStartNodeId
+    ) {
+      const hovered = networkState.nodes.get(hoveredNodeId)
+      if (hovered !== undefined) {
+        temp.effectiveEnd.copy(hovered.position)
+        end = temp.effectiveEnd
+      }
+    }
+    if (end === null) {
+      end = ghostPointRef.current
+    }
     if (end === null) {
       return
     }
@@ -71,7 +87,8 @@ export default function GhostBeamPreview({
     }
 
     temp.midpoint.addVectors(start, end).multiplyScalar(0.5)
-    temp.quat.setFromUnitVectors(UP, temp.dir.clone().normalize())
+    temp.dir.normalize()
+    temp.quat.setFromUnitVectors(UP, temp.dir)
     if (Number.isNaN(temp.quat.x)) {
       return
     }
