@@ -56,12 +56,13 @@ function BeamMesh({
   beam: Beam3D
   positions: Map<string, THREE.Vector3>
 }) {
+  const hoveredBeamId = useEditorStore((s) => s.hoveredBeamId)
+  const mode = useEditorStore((s) => s.mode)
+
   const a = positions.get(beam.nodeAId)
   const b = positions.get(beam.nodeBId)
 
-  const isHovered =
-    useEditorStore((s) => s.hoveredBeamId) === beam.id &&
-    useEditorStore((s) => s.mode) === 'DELETE'
+  const isHovered = hoveredBeamId === beam.id && mode === 'DELETE'
 
   const geometry = useMemo(() => {
     if (a === undefined || b === undefined) return null
