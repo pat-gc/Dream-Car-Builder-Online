@@ -364,3 +364,177 @@ export function addBeamWithMirror(
     endNodeId,
   }
 }
+
+export function findNearestNode(
+  state: NetworkState,
+  position: THREE.Vector3,
+  excludeIds: Set<string>,
+  mergeThreshold: number = DEFAULT_MERGE_THRESHOLD,
+): string | null {
+  const sqThreshold = mergeThreshold * mergeThreshold
+  let nearestId: string | null = null
+  let nearestSq = sqThreshold
+  for (const [id, node] of state.nodes) {
+    if (excludeIds.has(id)) continue
+    const sq = node.position.distanceToSquared(position)
+    if (sq <= nearestSq) {
+      nearestSq = sq
+      nearestId = id
+    }
+  }
+  return nearestId
+}
+
+export interface MergeNodeResult {
+  state: NetworkState
+  survivingNodeId: string
+  removedBeamIds: string[]
+}
+
+export function mergeNodeIntoTarget(
+  state: NetworkState,
+  sourceId: string,
+  targetId: string,
+): MergeNodeResult {
+  if (sourceId === targetId) {
+    const node = state.nodes.get(sourceId)
+    if (node === undefined) return { state, survivingNodeId: sourceId, removedBeamIds: [] }
+    return { state, survivingNodeId: sourceId, removedBeamIds: [] }
+  }
+
+  const srcNode = state.nodes.get(sourceId)
+  const tgtNode = state.nodes.get(targetId)
+  if (srcNode === undefined || tgtNode === undefined) {
+    return { state, survivingNodeId: srcNode === undefined ? targetId : sourceId, removedBeamIds: [] }
+  }
+
+  const next = cloneState(state)
+  const removedBeamIds: string[] = []
+
+  // Repoint every beam that referenced the source to the target. Drop a beam
+  // if it would become a self-loop (both ends == target) or a duplicate of an
+  // already-existing beam.
+  for (const [beamId, beam] of next.beams) {
+    if (beam.nodeAId !== sourceId && beam.nodeBId !== sourceId) continue
+
+    let aId = beam.nodeAId
+    let bId = beam.nodeBId
+    if (aId === sourceId) aId = targetId
+    if (bId === sourceId) bId = targetId
+
+    if (aId === bId) {
+      removedBeamIds.push(beamId)
+      next.beams.delete(beamId)
+      continue
+    }
+
+    if (findBeamBetween(next, aId, bId) !== undefined) {
+      removedBeamIds.push(beamId)
+      next.beams.delete(beamId)
+      continue
+    }
+
+    const updated: Beam3D = { ...beam, nodeAId: aId, nodeBId: bId }
+    next.beams.set(beamId, updated)
+  }
+
+  next.nodes.delete(sourceId)
+
+  // Recalculate restLength for every beam that now touches the target at the
+  // target's final position.
+  for (const [beamId, beam] of next.beams) {
+    if (beam.nodeAId !== targetId && beam.nodeBId !== targetId) continue
+    const a = next.nodes.get(beam.nodeAId)
+    const b = next.nodes.get(beam.nodeBId)
+    if (a === undefined || b === undefined) continue
+    const updated: Beam3D = { ...beam, restLength: a.position.distanceTo(b.position) }
+    next.beams.set(beamId, updated)
+  }
+
+  return { state: next, survivingNodeId: targetId, removedBeamIds }
+}
+
+export interface CommitDraggedMovesEntry {
+  sourceId: string
+  targetPos: THREE.Vector3
+}
+
+export interface CommitDraggedMovesResult {
+  state: NetworkState
+  movedOrDefaultIds: string[]
+  survivingNodeIds: string[]
+}
+
+export function commitDraggedMoves(
+  state: NetworkState,
+  moves: CommitDraggedMovesEntry[],
+  mergeThreshold: number = DEFAULT_MERGE_THRESHOLD,
+): CommitDraggedMovesResult {
+  if (moves.length === 0) {
+    return { state, movedOrDefaultIds: [], survivingNodeIds: [] }
+  }
+
+  // Verify all source ids exist; bail to no-op if any is missing entirely.
+  for (const m of moves) {
+    if (state.nodes.get(m.sourceId) === undefined) {
+      return { state, movedOrDefaultIds: [], survivingNodeIds: [] }
+    }
+  }
+
+  let working = state
+  const movedOrDefaultIds: string[] = []
+  const survivingNodeIds: string[] = []
+  const consumedSurvivors = new Set<string>()
+
+  for (const m of moves) {
+    const { sourceId, targetPos } = m
+
+    // Look for an existing node (other than this source) within merge
+    // threshold of the drop position, AND not already consumed as the
+    // survivor of a prior move in this same commit (so two dragged nodes
+    // dropped onto the same stationary node both merge into it).
+    const exclude = new Set<string>()
+    exclude.add(sourceId)
+    for (const s of consumedSurvivors) exclude.add(s)
+    // Also exclude sources that this commit will move/merge away from their
+    // current positions (so we don't accidentally merge onto a moving node
+    // whose final position differs from where it currently sits).
+    for (const other of moves) exclude.add(other.sourceId)
+
+    const survivor = findNearestNode(working, targetPos, exclude, mergeThreshold)
+    if (survivor !== null) {
+      const mergeResult = mergeNodeIntoTarget(working, sourceId, survivor)
+      working = mergeResult.state
+      survivingNodeIds.push(survivor)
+      consumedSurvivors.add(survivor)
+      movedOrDefaultIds.push(sourceId)
+      continue
+    }
+
+    // No merge target: move the node to the dropped position.
+    const moved = moveNode(working, sourceId, targetPos)
+    working = moved
+    movedOrDefaultIds.push(sourceId)
+    survivingNodeIds.push(sourceId)
+  }
+
+  // Recalculate restLength for every beam touching any node whose position
+  // may have changed through the above moves/merges. This catches beams that
+  // connect a moved/merged node to an unmoved node.
+  if (working !== state) {
+    const affected = new Set<string>()
+    for (let i = 0; i < moves.length; i++) {
+      affected.add(survivingNodeIds[i])
+    }
+    for (const [beamId, beam] of working.beams) {
+      if (!affected.has(beam.nodeAId) && !affected.has(beam.nodeBId)) continue
+      const a = working.nodes.get(beam.nodeAId)
+      const b = working.nodes.get(beam.nodeBId)
+      if (a === undefined || b === undefined) continue
+      const updated: Beam3D = { ...beam, restLength: a.position.distanceTo(b.position) }
+      working.beams.set(beamId, updated)
+    }
+  }
+
+  return { state: working, movedOrDefaultIds, survivingNodeIds }
+}

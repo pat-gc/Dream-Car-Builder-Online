@@ -16,6 +16,11 @@ import {
   writeBeamTransform,
   type BeamTransformCache,
 } from '../sim/beamTransform'
+import {
+  DEFAULT_MERGE_THRESHOLD,
+  mirrorPosition,
+  type CommitDraggedMovesEntry,
+} from '../sim/network'
 
 interface InteractionRouterProps {
   planeMeshRef: MutableRefObject<THREE.Object3D | null>
@@ -28,6 +33,8 @@ const temp = {
   startPos: new THREE.Vector3(),
   axisSnapped: new THREE.Vector3(),
   delta: new THREE.Vector3(),
+  mirrorPos: new THREE.Vector3(),
+  mirrorTarget: new THREE.Vector3(),
 }
 
 export default function InteractionRouter({
@@ -58,6 +65,22 @@ export default function InteractionRouter({
   const groupGrabPlanePointRef = useRef<THREE.Vector3 | null>(null)
   // Cached move targets reused across pointermove frames and the final commit.
   const groupMoveTargetsRef = useRef<Map<string, THREE.Vector3>>(new Map())
+
+  // Mirrored-drag (BUG 1): for a single dragged node, the id of the existing
+  // node that is the mirror of the dragged node's original position (null when
+  // symmetry is off, no counterpart was found, or the dragged node is itself a
+  // shared centerline node). Its connected beams are collected for imperative
+  // per-frame updates.
+  const mirrorCounterpartIdRef = useRef<string | null>(null)
+
+  // Mirrored-drag for a group: maps each selected nodeId -> its mirrored
+  // counterpart node id (or null if none). Counterpart ids with positions are
+  // accumulated here each pointermove for the final commit.
+  const groupMirrorCounterpartsRef = useRef<Map<string, string | null>>(new Map())
+  const groupMirrorTargetsRef = useRef<Map<string, THREE.Vector3>>(new Map())
+  // Beam ids referencing any mirrored counterpart (originals' set stays in
+  // connectedBeamsRef via collectConnectedBeams; counterparts appended here).
+  const mirrorConnectedBeamsRef = useRef<Set<string>>(new Set())
 
   // Marquee live rectangle in canvas-relative pixels.
   const marqueeStartRef = useRef<{ x: number; y: number } | null>(null)
@@ -102,6 +125,21 @@ export default function InteractionRouter({
       })
     }
 
+    function addConnectedBeamsTo(
+      nodeIds: Iterable<string>,
+      set: Set<string>,
+    ): void {
+      const beams = useNetworkStore.getState().networkState.beams
+      beams.forEach((beam, beamId) => {
+        if (
+          isIdInSet(nodeIds, beam.nodeAId) ||
+          isIdInSet(nodeIds, beam.nodeBId)
+        ) {
+          set.add(beamId)
+        }
+      })
+    }
+
     function collectConnectedBeamsForGroup(nodeIds: Iterable<string>): Set<string> {
       const result = new Set<string>()
       const beams = useNetworkStore.getState().networkState.beams
@@ -121,6 +159,57 @@ export default function InteractionRouter({
         if (n === id) return true
       }
       return false
+    }
+
+    function findMirrorCounterpart(
+      nodeId: string,
+      nodePos: THREE.Vector3,
+    ): string | null {
+      const ed = useEditorStore.getState()
+      if (!ed.symmetryEnabled) return null
+      const axis = ed.symmetryAxis
+      temp.mirrorPos.copy(mirrorPosition(nodePos, axis))
+      const sqThreshold = DEFAULT_MERGE_THRESHOLD * DEFAULT_MERGE_THRESHOLD
+      let nearestId: string | null = null
+      let nearestSq = sqThreshold
+      const nodes = useNetworkStore.getState().networkState.nodes
+      nodes.forEach((n, id) => {
+        if (id === nodeId) return
+        const sq = n.position.distanceToSquared(temp.mirrorPos)
+        if (sq <= nearestSq) {
+          nearestSq = sq
+          nearestId = id
+        }
+      })
+      return nearestId
+    }
+
+    function writeMirrorCounterpartFrame(
+      counterpartId: string,
+      mirroredPos: THREE.Vector3,
+    ): void {
+      const mesh = sharedMeshRegistry.nodeMeshes.get(counterpartId)
+      if (mesh !== undefined) {
+        mesh.position.copy(mirroredPos)
+      }
+      const beams = useNetworkStore.getState().networkState.beams
+      const cache = beamCacheRef.current
+      for (const beamId of mirrorConnectedBeamsRef.current) {
+        const beam = beams.get(beamId)
+        if (beam === undefined) continue
+        const otherId = otherBeamNode(beam, counterpartId)
+        if (otherId === null) continue
+        const other = nodeStorePosition(otherId)
+        if (other === null) continue
+        writeBeamTransform(beamId, mirroredPos, other, cache)
+      }
+    }
+
+    function resetMirrorDragState(): void {
+      mirrorCounterpartIdRef.current = null
+      groupMirrorCounterpartsRef.current.clear()
+      groupMirrorTargetsRef.current.clear()
+      mirrorConnectedBeamsRef.current.clear()
     }
 
     function nodeStorePosition(nodeId: string): THREE.Vector3 | null {
@@ -283,10 +372,8 @@ export default function InteractionRouter({
       const s = useEditorStore.getState()
 
       // --- Active group drag ---
-      // NOTE: mirrored group-drag (dragging a node also moves its mirrored
-      // counterpart symmetrically when symmetry is on) is intentionally NOT
-      // implemented in this pass to avoid destabilizing the STEP 13 drag;
-      // mirrored beam *creation* is the Step 14 priority. See Spec.md step 14.
+      // Mirrored group-drag: each selected node also moves its mirrored
+      // counterpart (if any) symmetrically in real time and commits both.
       if (
         s.mode === 'SELECT_MOVE' &&
         s.draggedNodeId !== null &&
@@ -308,10 +395,15 @@ export default function InteractionRouter({
         if (grab === null) return
         temp.delta.subVectors(planePoint, grab)
         const inc = s.snapIncrement
+        const symmetryOn = s.symmetryEnabled
+        const axis = s.symmetryAxis
         const moveTargets = groupMoveTargetsRef.current
         moveTargets.clear()
+        const mirrorTargets = groupMirrorTargetsRef.current
+        mirrorTargets.clear()
         let anyMoved = false
         const nodeIds: string[] = []
+        const counterpartIds: string[] = []
         for (const [id, start] of groupStartPositionsRef.current) {
           const nx = snapToIncrement(start.x + temp.delta.x, inc)
           const ny = snapToIncrement(start.y + temp.delta.y, inc)
@@ -320,9 +412,23 @@ export default function InteractionRouter({
           moveTargets.set(id, temp.snapped.clone())
           nodeIds.push(id)
           if (!anyMoved && !start.equals(temp.snapped)) anyMoved = true
+
+          const cId = symmetryOn
+            ? groupMirrorCounterpartsRef.current.get(id) ?? null
+            : null
+          if (cId !== null && cId !== undefined) {
+            temp.mirrorTarget.copy(mirrorPosition(temp.snapped, axis))
+            mirrorTargets.set(cId, temp.mirrorTarget.clone())
+            counterpartIds.push(cId)
+          }
         }
         const connectedBeams = collectConnectedBeamsForGroup(nodeIds)
-        writeGroupFrame(nodeIds, moveTargets, connectedBeams)
+        addConnectedBeamsTo(counterpartIds, connectedBeams)
+        const allIds = nodeIds.concat(counterpartIds)
+        const allPositions = new Map<string, THREE.Vector3>()
+        moveTargets.forEach((p, id) => allPositions.set(id, p))
+        mirrorTargets.forEach((p, id) => allPositions.set(id, p))
+        writeGroupFrame(allIds, allPositions, connectedBeams)
         if (anyMoved) hadRealDragRef.current = true
         return
       }
@@ -352,6 +458,13 @@ export default function InteractionRouter({
         )
         dragCurrentPosRef.current.copy(temp.snapped)
         writeDraggedFrame(s.draggedNodeId, temp.snapped)
+        // BUG 1: mirror the live dragged position to the counterpart node and
+        // its beams in the same frame.
+        const counterpart = mirrorCounterpartIdRef.current
+        if (counterpart !== null && s.symmetryEnabled) {
+          temp.mirrorTarget.copy(mirrorPosition(temp.snapped, s.symmetryAxis))
+          writeMirrorCounterpartFrame(counterpart, temp.mirrorTarget)
+        }
         if (!hadRealDragRef.current && dragStartPosRef.current !== null) {
           if (!dragStartPosRef.current.equals(temp.snapped)) {
             hadRealDragRef.current = true
@@ -513,6 +626,17 @@ export default function InteractionRouter({
           if (pos !== null) groupStartPositionsRef.current.set(id, pos.clone())
         })
         groupMoveTargetsRef.current.clear()
+        // BUG 1: for each selected node, locate its mirrored counterpart (if
+        // any) so group drag can move both sides symmetrically.
+        resetMirrorDragState()
+        const counterpartIds: string[] = []
+        groupStartPositionsRef.current.forEach((pos, id) => {
+          const cId = findMirrorCounterpart(id, pos)
+          groupMirrorCounterpartsRef.current.set(id, cId)
+          if (cId !== null) counterpartIds.push(cId)
+        })
+        mirrorConnectedBeamsRef.current.clear()
+        addConnectedBeamsTo(counterpartIds, mirrorConnectedBeamsRef.current)
         const planeMesh = planeMeshRef.current
         let grabPlanePoint: THREE.Vector3 | null = null
         if (planeMesh !== null) {
@@ -544,11 +668,22 @@ export default function InteractionRouter({
       // Single-node ready-to-drag (existing Step 11 flow).
       groupStartPositionsRef.current.clear()
       groupMoveTargetsRef.current.clear()
+      resetMirrorDragState()
       committedRef.current = false
       draggedIdBeforeClearRef.current = nodeHit.nodeId
       dragStartPosRef.current = storePos.clone()
       dragCurrentPosRef.current.copy(storePos)
       collectConnectedBeams(nodeHit.nodeId)
+
+      // BUG 1: locate the mirrored counterpart node (if symmetry is on and the
+      // dragged node is not on the centerline) and collect its connected
+      // beams so per-frame mirror updates can write them imperatively.
+      const counterpart = findMirrorCounterpart(nodeHit.nodeId, storePos)
+      if (counterpart !== null) {
+        mirrorCounterpartIdRef.current = counterpart
+        mirrorConnectedBeamsRef.current.clear()
+        addConnectedBeamsTo([counterpart], mirrorConnectedBeamsRef.current)
+      }
 
       useEditorStore.getState().setDraggedNodeId(nodeHit.nodeId, {
         x: storePos.x,
@@ -623,16 +758,20 @@ export default function InteractionRouter({
       }
 
       if (isGroup) {
-        const moves = new Map<string, THREE.Vector3>()
-        for (const [id, pos] of groupMoveTargetsRef.current) {
-          moves.set(id, pos)
-        }
+        const entries: CommitDraggedMovesEntry[] = []
+        groupMoveTargetsRef.current.forEach((pos, id) => {
+          entries.push({ sourceId: id, targetPos: pos })
+        })
+        groupMirrorTargetsRef.current.forEach((mPos, cId) => {
+          entries.push({ sourceId: cId, targetPos: mPos })
+        })
         committedRef.current = true
-        useNetworkStore.getState().commitNodeMoves(moves)
+        useNetworkStore.getState().commitDrag(entries)
         useEditorStore.getState().clearDraggedNode()
         groupStartPositionsRef.current.clear()
         groupMoveTargetsRef.current.clear()
         groupGrabPlanePointRef.current = null
+        resetMirrorDragState()
         setControlsEnabled(true)
         try {
           dom.releasePointerCapture(e.pointerId)
@@ -644,11 +783,26 @@ export default function InteractionRouter({
 
       const nodeId = s.draggedNodeId
       const finalPos = dragCurrentPosRef.current.clone()
+      const entries: CommitDraggedMovesEntry[] = [
+        { sourceId: nodeId, targetPos: finalPos },
+      ]
+      // BUG 1: commit the mirrored counterpart's final position alongside the
+      // dragged node so both move symmetrically. The same merge-on-release
+      // check applies to the counterpart's drop position (handled inside
+      // commitDrag).
+      const counterpart = mirrorCounterpartIdRef.current
+      if (counterpart !== null && s.symmetryEnabled) {
+        entries.push({
+          sourceId: counterpart,
+          targetPos: mirrorPosition(finalPos, s.symmetryAxis),
+        })
+      }
 
       committedRef.current = true
-      useNetworkStore.getState().commitNodeMove(nodeId, finalPos)
+      useNetworkStore.getState().commitDrag(entries)
       useEditorStore.getState().clearDraggedNode()
       dragStartPosRef.current = null
+      resetMirrorDragState()
       setControlsEnabled(true)
       try {
         dom.releasePointerCapture(e.pointerId)
@@ -824,8 +978,21 @@ export default function InteractionRouter({
           const groupIds = Array.from(groupStartPositionsRef.current.keys())
           if (groupIds.length >= 2) {
             restoreGroupImperatively(groupIds)
+            // Restore mirrored counterparts for the cancelled group drag.
+            const counterpartIds: string[] = []
+            groupMirrorCounterpartsRef.current.forEach((cId) => {
+              if (cId !== null && cId !== undefined) counterpartIds.push(cId)
+            })
+            if (counterpartIds.length > 0) {
+              restoreGroupImperatively(counterpartIds)
+            }
           } else {
             restoreNodeImperatively(id)
+            // Restore the single dragged node's mirrored counterpart.
+            const cId = mirrorCounterpartIdRef.current
+            if (cId !== null) {
+              restoreNodeImperatively(cId)
+            }
           }
         }
         committedRef.current = false
@@ -833,6 +1000,7 @@ export default function InteractionRouter({
         groupStartPositionsRef.current.clear()
         groupMoveTargetsRef.current.clear()
         groupGrabPlanePointRef.current = null
+        resetMirrorDragState()
         hideMarquee()
         setControlsEnabled(true)
       }

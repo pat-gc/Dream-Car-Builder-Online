@@ -3,12 +3,14 @@ import * as THREE from 'three'
 import {
   addBeam,
   addBeamWithMirror,
+  commitDraggedMoves,
   createNetworkState,
   findOrCreateNode,
   moveNode,
   moveNodes,
   removeBeam,
   removeNode,
+  type CommitDraggedMovesEntry,
   type NetworkState,
   type SymmetryAxis,
 } from '../sim/network'
@@ -35,6 +37,7 @@ export interface NetworkStoreState {
   ) => boolean
   commitNodeMove: (nodeId: string, position: THREE.Vector3) => void
   commitNodeMoves: (moves: Map<string, THREE.Vector3>) => void
+  commitDrag: (moves: CommitDraggedMovesEntry[]) => void
   deleteNode: (nodeId: string) => void
   deleteBeam: (beamId: string) => void
 }
@@ -145,6 +148,14 @@ export const useNetworkStore = create<NetworkStoreState>((set, get) => ({
     const next = moveNodes(state, moves)
     if (next === state) return
     set({ networkState: next })
+  },
+
+  commitDrag: (moves) => {
+    if (moves.length === 0) return
+    const state = get().networkState
+    const result = commitDraggedMoves(state, moves)
+    if (result.state === state) return
+    set({ networkState: result.state })
   },
 
   deleteNode: (nodeId) => {

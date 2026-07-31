@@ -4,7 +4,10 @@ import {
   addNode,
   addBeam,
   addBeamWithMirror,
+  commitDraggedMoves,
   findOrCreateNode,
+  findNearestNode,
+  mergeNodeIntoTarget,
   mirrorPosition,
   moveNode,
   moveNodes,
@@ -678,5 +681,281 @@ describe('addBeamWithMirror', () => {
     // The mirrored end position is (-1,0,3) which merges into pre-existing node.
     expect(result.state.nodes.has(pre.node.id)).toBe(true)
     expect(result.state.nodes.size).toBe(4)
+  })
+})
+
+describe('findNearestNode', () => {
+  it('returns the nearest existing node within threshold, excluding listed ids', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(1, 0, 0))
+    s = b.state
+    const nearA = findNearestNode(s, new THREE.Vector3(0.01, 0, 0), new Set([b.node.id]))
+    expect(nearA).toBe(a.node.id)
+  })
+
+  it('returns null when only nodes outside the threshold exist', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const far = findNearestNode(s, new THREE.Vector3(5, 0, 0), new Set())
+    expect(far).toBeNull()
+  })
+
+  it('returns null when all nearby nodes are excluded', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const excluded = findNearestNode(s, new THREE.Vector3(0, 0, 0), new Set([a.node.id]))
+    expect(excluded).toBeNull()
+  })
+})
+
+describe('mergeNodeIntoTarget', () => {
+  it('repoints beams connected to the source onto the target node, dropping duplicates', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(2, 0, 0))
+    s = b.state
+    const c = addNode(s, new THREE.Vector3(1, 0, 0))
+    s = c.state
+    const ab = addBeam(s, a.node.id, b.node.id)
+    s = ab!.state
+    const bc = addBeam(s, b.node.id, c.node.id)
+    s = bc!.state
+    const abId = ab!.beam.id
+    const bcId = bc!.beam.id
+
+    const res = mergeNodeIntoTarget(s, c.node.id, a.node.id)
+
+    // 'c' removed, 'a' survives.
+    expect(res.state.nodes.has(c.node.id)).toBe(false)
+    expect(res.state.nodes.has(a.node.id)).toBe(true)
+    // bc repoints to b-a, which duplicates ab -> bc is dropped, ab survives.
+    expect(res.state.beams.has(bcId)).toBe(false)
+    expect(res.state.beams.has(abId)).toBe(true)
+    expect(res.state.beams.size).toBe(1)
+    expect(res.removedBeamIds).toContain(bcId)
+  })
+
+  it('repoints a beam to the target without dropping it when no duplicate exists', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(6, 0, 0))
+    s = b.state
+    const c = addNode(s, new THREE.Vector3(2, 4, 0))
+    s = c.state
+    // Only one beam, c-b; no a-b beam, so repointing c->a yields a-b uniquely.
+    const cb = addBeam(s, c.node.id, b.node.id)
+    s = cb!.state
+    const cbId = cb!.beam.id
+
+    const res = mergeNodeIntoTarget(s, c.node.id, a.node.id)
+    const beamAfter = res.state.beams.get(cbId)!
+    expect(beamAfter).toBeDefined()
+    expect(beamAfter.nodeAId).toBe(a.node.id)
+    expect(beamAfter.nodeBId).toBe(b.node.id)
+    // a(0,0,0) - b(6,0,0) => length 6
+    expect(beamAfter.restLength).toBeCloseTo(6, 10)
+  })
+
+  it('drops a beam that would become a zero-length self-loop after repointing', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(1, 0, 0))
+    s = b.state
+    // beam a-b; merging b INTO a would make this beam a<-b -> a<-a (self).
+    const ab = addBeam(s, a.node.id, b.node.id)
+    s = ab!.state
+    const abId = ab!.beam.id
+
+    const res = mergeNodeIntoTarget(s, b.node.id, a.node.id)
+    expect(res.state.nodes.has(b.node.id)).toBe(false)
+    expect(res.state.beams.has(abId)).toBe(false)
+    expect(res.removedBeamIds).toContain(abId)
+  })
+
+  it('drops a beam that would duplicate an already-existing beam after repointing', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(2, 0, 0))
+    s = b.state
+    const c = addNode(s, new THREE.Vector3(1, 0, 0))
+    s = c.state
+    const ab = addBeam(s, a.node.id, b.node.id)
+    s = ab!.state
+    const ac = addBeam(s, a.node.id, c.node.id)
+    s = ac!.state
+    const acId = ac!.beam.id
+
+    // Merging c into b: ac becomes a-b, which duplicates ab -> ac removed.
+    const res = mergeNodeIntoTarget(s, c.node.id, b.node.id)
+    expect(res.state.nodes.has(c.node.id)).toBe(false)
+    expect(res.state.beams.has(acId)).toBe(false)
+    expect(res.state.beams.size).toBe(1)
+  })
+
+  it('is a no-op returning the same state ref when source === target', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const res = mergeNodeIntoTarget(s, a.node.id, a.node.id)
+    expect(res.state).toBe(s)
+    expect(res.survivingNodeId).toBe(a.node.id)
+  })
+})
+
+describe('commitDraggedMoves', () => {
+  it('moves a node when no other node is within merge threshold', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(5, 0, 0))
+    s = b.state
+    const ab = addBeam(s, a.node.id, b.node.id)
+    s = ab!.state
+
+    const res = commitDraggedMoves(s, [
+      { sourceId: a.node.id, targetPos: new THREE.Vector3(0, 4, 0) },
+    ])
+
+    expect(res.survivingNodeIds).toEqual([a.node.id])
+    expect(res.state.nodes.get(a.node.id)!.position.equals(new THREE.Vector3(0, 4, 0))).toBe(true)
+    // a(0,4,0)-b(5,0,0) => sqrt(41)
+    expect(res.state.beams.get(ab!.beam.id)!.restLength).toBeCloseTo(Math.sqrt(41), 8)
+  })
+
+  it('merges the dragged node into a nearby stationary node instead of leaving overlapping nodes', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(5, 0, 0))
+    s = b.state
+    const c = addNode(s, new THREE.Vector3(10, 0, 0))
+    s = c.state
+    const ab = addBeam(s, a.node.id, b.node.id)
+    s = ab!.state
+    const bc = addBeam(s, b.node.id, c.node.id)
+    s = bc!.state
+
+    // Drag a (which connects to b) onto c's position => a merges into c.
+    // ab repoints to b-c, which duplicates the existing bc beam -> ab is
+    // dropped. The b-c connection survives as a single beam.
+    const res = commitDraggedMoves(s, [
+      { sourceId: a.node.id, targetPos: new THREE.Vector3(10, 0, 0) },
+    ])
+
+    expect(res.survivingNodeIds).toEqual([c.node.id])
+    expect(res.state.nodes.has(a.node.id)).toBe(false)
+    expect(res.state.nodes.size).toBe(2)
+    expect(res.state.beams.size).toBe(1)
+    expect(findBeamBetween(res.state, b.node.id, c.node.id)).toBeDefined()
+  })
+
+  it('merges a dragged node onto a stationary node that is NOT its neighbor (no dedup)', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(5, 0, 0))
+    s = b.state
+    const c = addNode(s, new THREE.Vector3(10, 0, 0))
+    s = c.state
+    const ab = addBeam(s, a.node.id, b.node.id)
+    s = ab!.state
+    const abId = ab!.beam.id
+    // No b-c beam, so dragging a onto c repoints ab to c-b uniquely.
+    const res = commitDraggedMoves(s, [
+      { sourceId: a.node.id, targetPos: new THREE.Vector3(10, 0, 0) },
+    ])
+
+    expect(res.survivingNodeIds).toEqual([c.node.id])
+    expect(res.state.nodes.has(a.node.id)).toBe(false)
+    expect(res.state.nodes.size).toBe(2)
+    expect(res.state.beams.size).toBe(1)
+    const beam = res.state.beams.get(abId)!
+    expect(beam.nodeAId).toBe(c.node.id)
+    expect(beam.nodeBId).toBe(b.node.id)
+  })
+
+  it('drops the degenerate beam when merging makes the dragged node coincide with its only neighbor', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(2, 0, 0))
+    s = b.state
+    const ab = addBeam(s, a.node.id, b.node.id)
+    s = ab!.state
+
+    // Drag a onto b => ab becomes a self-loop and is removed; a merges into b.
+    const res = commitDraggedMoves(s, [
+      { sourceId: a.node.id, targetPos: new THREE.Vector3(2, 0, 0) },
+    ])
+
+    expect(res.survivingNodeIds).toEqual([b.node.id])
+    expect(res.state.nodes.has(a.node.id)).toBe(false)
+    expect(res.state.beams.size).toBe(0)
+  })
+
+  it('moves multiple nodes independently in one commit', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(3, 0, 0))
+    s = b.state
+    const ab = addBeam(s, a.node.id, b.node.id)
+    s = ab!.state
+    const abId = ab!.beam.id
+
+    const res = commitDraggedMoves(s, [
+      { sourceId: a.node.id, targetPos: new THREE.Vector3(0, 0, 4) },
+      { sourceId: b.node.id, targetPos: new THREE.Vector3(3, 0, 4) },
+    ])
+
+    expect(res.survivingNodeIds).toEqual([a.node.id, b.node.id])
+    expect(res.state.beams.get(abId)!.restLength).toBeCloseTo(3, 10)
+  })
+
+  it('does not merge a dragged node onto another node that is itself being moved in the same commit', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const b = addNode(s, new THREE.Vector3(1, 0, 0))
+    s = b.state
+    const ab = addBeam(s, a.node.id, b.node.id)
+    s = ab!.state
+
+    // Both move to positions that coincide with the OTHER node's original
+    // (stationary) position; since both are being moved, neither merges.
+    const res = commitDraggedMoves(s, [
+      { sourceId: a.node.id, targetPos: new THREE.Vector3(1, 0, 0) },
+      { sourceId: b.node.id, targetPos: new THREE.Vector3(0, 0, 0) },
+    ])
+
+    expect(res.state.nodes.size).toBe(2)
+    expect(res.state.nodes.has(a.node.id)).toBe(true)
+    expect(res.state.nodes.has(b.node.id)).toBe(true)
+    expect(res.survivingNodeIds).toEqual([a.node.id, b.node.id])
+  })
+
+  it('is a no-op returning the same state ref for an empty moves list', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    expect(commitDraggedMoves(s, []).state).toBe(s)
+  })
+
+  it('returns the same state ref when a source id does not exist', () => {
+    let s = createNetworkState()
+    const a = addNode(s, new THREE.Vector3(0, 0, 0))
+    s = a.state
+    const res = commitDraggedMoves(s, [
+      { sourceId: 'nope', targetPos: new THREE.Vector3(1, 0, 0) },
+    ])
+    expect(res.state).toBe(s)
   })
 })
