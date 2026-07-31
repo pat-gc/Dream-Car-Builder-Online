@@ -6,6 +6,8 @@ export type BeamStage = 'idle' | 'awaiting-second-point'
 
 export type SymmetryAxis = 'X' | 'Z'
 
+export type SnapView = 'TOP' | 'BOTTOM' | 'FRONT' | 'BACK' | 'LEFT' | 'RIGHT'
+
 export interface DepthVector {
   x: number
   y: number
@@ -58,6 +60,14 @@ export interface EditorState {
   setBeamStart: (nodeId: string, depth: DepthVector) => void
   resetBeamPlacement: () => void
   cancelBeamPlacement: () => void
+
+  // Camera orthographic snap view request (Step 15).
+  // `snapView` carries the requested view; `snapRequestId` increments on each
+  // request so a subscriber inside <Canvas> can react even when the same view
+  // is requested twice in a row.
+  snapView: SnapView | null
+  snapRequestId: number
+  requestSnapView: (view: SnapView) => void
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -202,4 +212,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       depthOverrideVector: null,
       hoveredNodeId: null,
     }),
+
+  // Camera orthographic snap view request (Step 15).
+  snapView: null,
+  snapRequestId: 0,
+  requestSnapView: (view) =>
+    set((state) => ({
+      snapView: view,
+      // Monotonic but wrap-safe enough; contentType is counter-only.
+      snapRequestId: state.snapRequestId + 1,
+    })),
 }))

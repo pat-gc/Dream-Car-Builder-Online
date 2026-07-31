@@ -11,6 +11,7 @@ import PhysicsLoop from './components/PhysicsLoop'
 import InteractionRouter from './components/InteractionRouter'
 import MarqueeOverlay from './components/MarqueeOverlay'
 import MirrorPlane from './components/MirrorPlane'
+import CameraController from './components/CameraController'
 
 function Scene() {
   return (
@@ -95,6 +96,7 @@ export default function App() {
           enableDamping
           dampingFactor={0.1}
         />
+        <CameraController />
       </Canvas>
       <MarqueeOverlay marqueeDivRef={marqueeDivRef} />
       <EditorUI />
