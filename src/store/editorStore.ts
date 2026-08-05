@@ -1,8 +1,34 @@
 import { create } from 'zustand'
 
-export type EditorMode = 'ADD_BEAM' | 'SELECT_MOVE' | 'DELETE' | 'SIMULATE'
+export type EditorMode =
+  | 'ADD_BEAM'
+  | 'ADD_WHEEL'
+  | 'ADD_ENGINE'
+  | 'ADD_SEAT'
+  | 'ADD_TRANSMISSION'
+  | 'SELECT_MOVE'
+  | 'DELETE'
+  | 'SIMULATE'
 
+// Build modes = the two/three-click placement tools (everything that uses the
+// camera-perpendicular placement plane + ghost previews).
+export const BUILD_MODES: ReadonlySet<EditorMode> = new Set<EditorMode>([
+  'ADD_BEAM',
+  'ADD_WHEEL',
+  'ADD_ENGINE',
+  'ADD_SEAT',
+  'ADD_TRANSMISSION',
+])
+
+export function isBuildMode(mode: EditorMode): boolean {
+  return BUILD_MODES.has(mode)
+}
+
+// Two-click flow (Beam, Wheel, Transmission) shares `beamStage`.
 export type BeamStage = 'idle' | 'awaiting-second-point'
+
+// Three-click flow (Engine, Seat) uses `mountStage`.
+export type MountStage = 'idle' | 'awaiting-second-point' | 'awaiting-third-point'
 
 export type SymmetryAxis = 'X' | 'Z'
 
@@ -61,6 +87,24 @@ export interface EditorState {
   resetBeamPlacement: () => void
   cancelBeamPlacement: () => void
 
+  // Step 16c — three-click RigidMount (Engine/Seat) flow.
+  mountStage: MountStage
+  mountNodeIds: string[] // up to 3 accumulated node ids
+  depthOverrideVectorMount: DepthVector | null // depth set by click 1
+  setMountFirstNode: (nodeId: string, depth: DepthVector) => void
+  setMountSecondNode: (nodeId: string) => void
+  resetMountPlacement: () => void
+  cancelMountPlacement: () => void
+
+  // Step 16c — live ghost preview point (cursor position on the camera-
+  // perpendicular placement plane while a part placement is in progress).
+  // Kept in the editor store rather than a ref because the ghost preview
+  // renders inside <Canvas> as a child that needs to react to it. Updates are
+  // imperative (pointermove rate, user-gesture rate — per SPEC this is exempt
+  // from the per-frame hot-path budget).
+  ghostPreviewPoint: DepthVector | null
+  setGhostPreviewPoint: (point: DepthVector | null) => void
+
   // Camera orthographic snap view request (Step 15).
   // `snapView` carries the requested view; `snapRequestId` increments on each
   // request so a subscriber inside <Canvas> can react even when the same view
@@ -80,6 +124,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       draggedNodeId: null,
       depthOverrideVector: null,
       selectedNodeIds: new Set<string>(),
+      // Clear all placement flows on mode switch (beam two-click + mount
+      // three-click), so switching tools mid-placement never leaves a
+      // half-built part dangling.
+      beamStage: 'idle',
+      beamStartNodeId: null,
+      mountStage: 'idle',
+      mountNodeIds: [],
+      depthOverrideVectorMount: null,
+      ghostPreviewPoint: null,
     }),
 
   snapIncrement: 0.5,
@@ -107,6 +160,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       depthOverrideVector: null,
       draggedNodeId: null,
       selectedNodeIds: new Set<string>(),
+      mountStage: 'idle',
+      mountNodeIds: [],
+      depthOverrideVectorMount: null,
+      ghostPreviewPoint: null,
     })
   },
 
@@ -203,6 +260,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       beamStage: 'idle',
       beamStartNodeId: null,
       depthOverrideVector: null,
+      ghostPreviewPoint: null,
     }),
 
   cancelBeamPlacement: () =>
@@ -211,7 +269,69 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       beamStartNodeId: null,
       depthOverrideVector: null,
       hoveredNodeId: null,
+      ghostPreviewPoint: null,
     }),
+
+  // Step 16c — three-click RigidMount (Engine/Seat) flow.
+  // Click 1 -> mountNodeIds=[a]; click 2 -> [a,b]; click 3 -> finalizes via
+  // network action and resets to idle. depthOverrideVectorMount mirrors the
+  // beam flow so the placement plane stacks at click-1's depth (no ground
+  // fallback, per rule 4).
+  mountStage: 'idle',
+  mountNodeIds: [],
+  depthOverrideVectorMount: null,
+  setMountFirstNode: (nodeId, depth) =>
+    set({
+      mountStage: 'awaiting-second-point',
+      mountNodeIds: [nodeId],
+      depthOverrideVectorMount: depth,
+    }),
+  setMountSecondNode: (nodeId) => {
+    const ids = useEditorStore.getState().mountNodeIds
+    // Defensive: never push a duplicate (the interaction layer already
+    // guards against clicking the same node twice).
+    if (ids[0] === nodeId) return
+    set({
+      mountStage: 'awaiting-third-point',
+      mountNodeIds: [ids[0], nodeId],
+    })
+  },
+  resetMountPlacement: () =>
+    set({
+      mountStage: 'idle',
+      mountNodeIds: [],
+      depthOverrideVectorMount: null,
+      ghostPreviewPoint: null,
+    }),
+  cancelMountPlacement: () =>
+    set({
+      mountStage: 'idle',
+      mountNodeIds: [],
+      depthOverrideVectorMount: null,
+      hoveredNodeId: null,
+      ghostPreviewPoint: null,
+    }),
+
+  // Step 16c — ghost preview point (live cursor position on the placement
+  // plane while a part placement is in progress; null hides the ghost).
+  ghostPreviewPoint: null,
+  setGhostPreviewPoint: (point) => {
+    if (point === null) {
+      if (useEditorStore.getState().ghostPreviewPoint === null) return
+      set({ ghostPreviewPoint: null })
+      return
+    }
+    const cur = useEditorStore.getState().ghostPreviewPoint
+    if (
+      cur !== null &&
+      cur.x === point.x &&
+      cur.y === point.y &&
+      cur.z === point.z
+    ) {
+      return
+    }
+    set({ ghostPreviewPoint: point })
+  },
 
   // Camera orthographic snap view request (Step 15).
   snapView: null,

@@ -1,7 +1,7 @@
 import { useMemo, useRef, type MutableRefObject } from 'react'
 import { useThree, useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { useEditorStore } from '../store/editorStore'
+import { useEditorStore, isBuildMode } from '../store/editorStore'
 
 const PLANE_SIZE = 1000
 const PLANE_DEFAULT_NORMAL = new THREE.Vector3(0, 0, 1)
@@ -15,6 +15,9 @@ export default function PlacementPlane({ planeMeshRef }: PlacementPlaneProps) {
   const { camera } = useThree()
 
   const depthOverrideVector = useEditorStore((s) => s.depthOverrideVector)
+  const depthOverrideVectorMount = useEditorStore(
+    (s) => s.depthOverrideVectorMount,
+  )
 
   const temp = useMemo(
     () => ({
@@ -37,8 +40,11 @@ export default function PlacementPlane({ planeMeshRef }: PlacementPlaneProps) {
       state.mode === 'SELECT_MOVE' &&
       state.draggedNodeId !== null &&
       state.draggedNodeId !== undefined
+    // Step 16c — the camera-perpendicular placement plane is active for ALL
+    // build modes (Beam/Wheel/Engine/Seat/Transmission) + live drag, never a
+    // ground fallback (rule 4).
     const active =
-      !state.isSimulating && (state.mode === 'ADD_BEAM' || dragging)
+      !state.isSimulating && (isBuildMode(state.mode) || dragging)
     mesh.visible = active
     if (!active) {
       return
@@ -51,12 +57,17 @@ export default function PlacementPlane({ planeMeshRef }: PlacementPlaneProps) {
     temp.worldDir.normalize()
 
     temp.depthPoint.set(0, 0, 0)
-    if (depthOverrideVector !== null && depthOverrideVector !== undefined) {
-      temp.depthPoint.set(
-        depthOverrideVector.x,
-        depthOverrideVector.y,
-        depthOverrideVector.z,
-      )
+    // Step 16c — mount (Engine/Seat) placement stacks the plane at click-1's
+    // depth via depthOverrideVectorMount; two-click parts/beam use the beam
+    // depth override. Whichever flow is active supplies the anchor point.
+    const isMount =
+      state.mode === 'ADD_ENGINE' || state.mode === 'ADD_SEAT'
+    const depth =
+      isMount
+        ? depthOverrideVectorMount
+        : depthOverrideVector
+    if (depth !== null && depth !== undefined) {
+      temp.depthPoint.set(depth.x, depth.y, depth.z)
     }
 
     const dot = PLANE_DEFAULT_NORMAL.dot(temp.worldDir)

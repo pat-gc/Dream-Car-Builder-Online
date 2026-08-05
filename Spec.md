@@ -54,7 +54,80 @@ Beam3D {
 }
 ```
 
-## Modes (explicit state machine, build/test in isolation before wiring to 3D)
+## Vehicle Parts Data Model
+Parts are NOT a separate free-floating layer — all four part types (Wheel,
+Engine, Seat, Transmission) attach to and merge with the SAME structural
+node graph as regular beams, using the identical `findOrCreateNode` merge
+behavior (rule 6). The key difference between them is purely how they
+participate in the physics solve.
+
+### Physics classification — three categories
+1. **Spring beams** (existing `Beam3D`) — flex per Hooke's law, can break
+   above `maxStress`. This is the default/only category through Step 15.
+2. **Rigid parts** (Wheel, Engine, Seat) — heavy, but must NOT flex at all.
+   These are NOT implemented as very-high-stiffness springs (that still
+   jitters/approximates); they are solved as hard distance constraints
+   (fixed-length rods) between their mounting nodes, enforced as a
+   post-integration correction pass in `stepPhysics`, separate from and
+   after the spring-force pass. They still contribute mass to their
+   mounting node(s) for gravity/inertia purposes.
+3. **Non-structural connectors** (Transmission) — contribute ZERO physics
+   constraint of any kind (no spring, no rigid distance-lock). They still
+   attach to and merge with existing structural nodes exactly like a beam
+   or WheelPart (same `findOrCreateNode` two-click flow) — the ONLY
+   difference from a spring beam is that they're entirely excluded from
+   the physics solve, so they can visually cross/overlap other beams
+   without needing to structurally align with them. They exist purely as a
+   logical/visual link for the future drivetrain system (Step 17: mapping
+   engine → transmission → wheel for torque delivery).
+
+### Types
+```ts
+// Rigid two-point part: Wheel. Same two-click flow as Beam3D (attaches to
+// existing structural nodes via findOrCreateNode/merge), but rendered with
+// a wheel mesh perpendicular to the beam axis at nodeBId (the axle/outer
+// end), and solved as a rigid distance constraint, never a spring.
+WheelPart {
+  id: string
+  nodeAId: string      // hub-side structural attachment
+  nodeBId: string       // axle end — wheel mesh renders here, perpendicular
+                          // to the nodeAId→nodeBId axis
+  restLength: number     // fixed distance, enforced as rigid constraint
+  wheelRadius: number
+  mass: number            // heavy
+}
+
+// Rigid three-point mount: Engine or Seat. Three existing structural nodes,
+// each clicked/merged individually (same findOrCreateNode behavior as a
+// beam endpoint). All three pairwise distances are enforced as rigid
+// constraints (i.e. the mount behaves as a rigid triangle).
+RigidMount {
+  id: string
+  type: 'ENGINE' | 'SEAT'
+  nodeIds: [string, string, string]
+  restLengths: [number, number, number]  // pairwise, rigid, never flex
+  mass: number                            // heavy
+}
+
+// Non-structural connector: Transmission. Attaches to existing structural
+// nodes via the SAME two-click flow and findOrCreateNode merge behavior as
+// a beam or WheelPart (nodeAId/nodeBId, not raw free-floating points) — so
+// it snaps/merges just like everything else. The difference is purely in
+// the physics solve: it contributes NO constraint at all (no spring, no
+// rigid distance-lock), so it can visually cross/overlap other beams
+// without needing to align with them structurally. It exists as a
+// logical/visual link for the future drivetrain system (Step 17: mapping
+// engine → transmission → wheel for torque delivery).
+TransmissionLink {
+  id: string
+  nodeAId: string
+  nodeBId: string
+  mass: number   // still contributes to overall vehicle mass display/stats,
+                   // but is not attached to the physics constraint graph
+}
+```
+
+
 - `ADD_BEAM` — the only placement tool; there is no standalone "place a node"
   mode. Nodes only ever come into existence as the endpoint of a beam
   (or via auto-merge with an existing node). Flow:
@@ -157,15 +230,26 @@ maintained/extended as the project grows:
 9. PhysicsLoop component inside Canvas, Simulate/Stop toggle with state
    snapshot + reset. Follow the ref-based/imperative-sync pattern from the
    State Management section — no per-frame setState.
-10. Pinned/anchor nodes  SKIP THIS
+10. Pinned/anchor nodes
 11. SELECT_MOVE drag tool
 12. DELETE tool
 13. Multi-select (box + shift)
 14. Symmetry/mirror mode
 15. Camera orthographic snap views (Top/Bottom/Front/Back/Left/Right) via
     viewport gizmo or buttons
-16. Vehicle parts: wheels, engine, transmission, seat
-17. Drivable physics (input → torque/steering)
+16. Vehicle parts, per the Vehicle Parts Data Model section:
+    16a. Data model + network manager functions for WheelPart, RigidMount
+         (Engine/Seat), TransmissionLink — placement, merge behavior,
+         removal/cascade — with unit tests. No physics solving yet.
+    16b. Rigid distance-constraint solving in `stepPhysics` (Wheel/Engine/
+         Seat never flex) as a distinct pass from the spring-beam pass —
+         with unit tests proving zero flex under load.
+    16c. Placement UI/modes (Add Wheel/Engine/Transmission/Seat), ghost
+         previews, rendering (wheel mesh perpendicular at axle node, engine/
+         seat placeholder geometry, transmission as a simple connector
+         mesh), drag-following, deletion cascade.
+17. Drivable physics (input → torque/steering, using the Transmission's
+    logical engine→wheel graph from the parts layer)
 
 ## Workflow Discipline
 - One prompt = one numbered step above. Don't bundle fixes with features.

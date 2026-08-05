@@ -3,6 +3,10 @@ import { useEditorStore, type EditorMode, type SnapView } from '../store/editorS
 
 const MODE_BUTTONS: { mode: Exclude<EditorMode, 'SIMULATE'>; label: string }[] = [
   { mode: 'ADD_BEAM', label: 'Add Beam' },
+  { mode: 'ADD_WHEEL', label: 'Add Wheel' },
+  { mode: 'ADD_ENGINE', label: 'Add Engine' },
+  { mode: 'ADD_SEAT', label: 'Add Seat' },
+  { mode: 'ADD_TRANSMISSION', label: 'Add Trans' },
   { mode: 'SELECT_MOVE', label: 'Select/Move' },
   { mode: 'DELETE', label: 'Delete' },
 ]
@@ -306,6 +310,9 @@ export default function EditorUI() {
       }
       if (state.beamStage === 'awaiting-second-point') {
         state.cancelBeamPlacement()
+      }
+      if (state.mountStage !== 'idle') {
+        state.cancelMountPlacement()
       }
     }
     window.addEventListener('keydown', onKeyDown)

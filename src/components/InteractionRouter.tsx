@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, type MutableRefObject } from 'react'
 import { useThree } from '@react-three/fiber'
 import * as THREE from 'three'
-import { useEditorStore } from '../store/editorStore'
-import { useNetworkStore } from '../store/networkStore'
+import { useEditorStore, isBuildMode } from '../store/editorStore'
+import { useNetworkStore, type RigidMountKind } from '../store/networkStore'
 import { sharedMeshRegistry } from '../sim/meshRegistry'
 import {
   getNearestBeamHit,
@@ -96,8 +96,20 @@ export default function InteractionRouter({
     function activeForBuild(): boolean {
       const s = useEditorStore.getState()
       if (s.isSimulating) return false
-      if (s.mode !== 'ADD_BEAM') return false
-      return true
+      return isBuildMode(s.mode)
+    }
+
+    // Step 16c — Wheel/Transmission use the SAME two-click flow as Beam
+    // (share beamStage/beamStartNodeId). Engine/Seat use the three-click
+    // mount flow (mountStage/mountNodeIds).
+    function isMountMode(): boolean {
+      const s = useEditorStore.getState()
+      return s.mode === 'ADD_ENGINE' || s.mode === 'ADD_SEAT'
+    }
+
+    function isTwoClickPartMode(): boolean {
+      const s = useEditorStore.getState()
+      return s.mode === 'ADD_WHEEL' || s.mode === 'ADD_TRANSMISSION'
     }
 
     function activeForSelectMove(): boolean {
@@ -538,8 +550,29 @@ export default function InteractionRouter({
         sharedMeshRegistry.nodeMeshes,
       )
 
+      const ed = useEditorStore.getState()
+      // A part placement is "in progress" when a two-click part (Wheel/Trans)
+      // is awaiting its second click, OR a three-click mount is past click 1.
+      const partInProgress =
+        (isTwoClickPartMode() && ed.beamStage === 'awaiting-second-point') ||
+        (isMountMode() && ed.mountStage !== 'idle')
+
       if (nodeHit !== null) {
-        useEditorStore.getState().setHoveredNodeId(nodeHit.nodeId)
+        ed.setHoveredNodeId(nodeHit.nodeId)
+        // Snap the ghost preview to the hovered node's actual position so the
+        // ghost line/triangle attaches cleanly to existing structure.
+        if (partInProgress) {
+          const hoveredNode = useNetworkStore.getState().networkState.nodes.get(
+            nodeHit.nodeId,
+          )
+          if (hoveredNode !== undefined) {
+            ed.setGhostPreviewPoint({
+              x: hoveredNode.position.x,
+              y: hoveredNode.position.y,
+              z: hoveredNode.position.z,
+            })
+          }
+        }
         return
       }
 
@@ -565,6 +598,18 @@ export default function InteractionRouter({
       writeSnappedHit(planePoint)
 
       const state = useEditorStore.getState()
+
+      // Step 16c — drive the live ghost-preview point for both two-click and
+      // three-click part flows (ADD_BEAM keeps using ghostPointRef + axis
+      // snap below; parts use the store ghost point read imperatively by the
+      // ghost preview component).
+      if (partInProgress) {
+        const cur = ghostPointRef.current
+        const gp = cur !== null ? cur : planePoint
+        ed.setGhostPreviewPoint({ x: gp.x, y: gp.y, z: gp.z })
+        if (isMountMode()) return
+      }
+
       if (state.beamStage !== 'awaiting-second-point') return
       const startId = state.beamStartNodeId
       if (startId === null || startId === undefined) return
@@ -578,6 +623,15 @@ export default function InteractionRouter({
         temp.startPos.copy(startNode.position)
         temp.axisSnapped.copy(snapToAxis(temp.startPos, current))
         current.copy(temp.axisSnapped)
+        // Update the store ghost point to the axis-snapped end too, so a
+        // Wheel/Transmission ghost beam follows the snapped cursor.
+        if (isTwoClickPartMode()) {
+          state.setGhostPreviewPoint({
+            x: current.x,
+            y: current.y,
+            z: current.z,
+          })
+        }
       }
     }
 
@@ -863,13 +917,127 @@ export default function InteractionRouter({
         sharedMeshRegistry.nodeMeshes,
       )
 
+      // --- Step 16c: Three-click mount flow (Engine/Seat) ---
+      // Click 1 sets node A, click 2 sets node B, click 3 sets node C and
+      // finalizes the RigidMount. Each click attaches via findOrCreateNode so
+      // a click on empty space spawns a structural node at the plane point.
+      if (isMountMode()) {
+        const kind: RigidMountKind = s.mode === 'ADD_ENGINE' ? 'ENGINE' : 'SEAT'
+        const network = useNetworkStore.getState()
+
+        if (s.mountStage === 'idle' || s.mountStage === undefined) {
+          // Click 1.
+          if (nodeHit !== null) {
+            const node = network.networkState.nodes.get(nodeHit.nodeId)
+            if (node === undefined) return
+            s.setMountFirstNode(nodeHit.nodeId, {
+              x: node.position.x,
+              y: node.position.y,
+              z: node.position.z,
+            })
+          } else {
+            const planeMesh = planeMeshRef.current
+            if (planeMesh === null) return
+            const planePoint = raycastPlane(
+              planeMesh,
+              snapshot.camera,
+              e.clientX,
+              e.clientY,
+              rect,
+            )
+            if (planePoint === null) return
+            const snapped = writeSnappedHit(planePoint)
+            const startNodeId = network.commitPartStart(snapped.clone())
+            const startNode = network.networkState.nodes.get(startNodeId)
+            if (startNode === undefined) return
+            s.setMountFirstNode(startNodeId, {
+              x: startNode.position.x,
+              y: startNode.position.y,
+              z: startNode.position.z,
+            })
+          }
+          return
+        }
+
+        if (s.mountStage === 'awaiting-second-point') {
+          // Click 2 -> append second node.
+          const firstId = s.mountNodeIds[0]
+          if (firstId === undefined) {
+            s.cancelMountPlacement()
+            return
+          }
+          if (nodeHit !== null) {
+            if (nodeHit.nodeId === firstId) return
+            s.setMountSecondNode(nodeHit.nodeId)
+          } else {
+            const planeMesh = planeMeshRef.current
+            if (planeMesh === null) return
+            const planePoint = raycastPlane(
+              planeMesh,
+              snapshot.camera,
+              e.clientX,
+              e.clientY,
+              rect,
+            )
+            if (planePoint === null) return
+            const snapped = writeSnappedHit(planePoint)
+            const secondNodeId = network.commitPartStart(snapped.clone())
+            if (secondNodeId === firstId) return
+            s.setMountSecondNode(secondNodeId)
+          }
+          return
+        }
+
+        // Click 3 -> finalize.
+        const ids = s.mountNodeIds
+        if (ids.length < 2) {
+          s.cancelMountPlacement()
+          return
+        }
+        if (nodeHit !== null) {
+          // Use the hovered node's own position so findOrCreateNode merges
+          // onto it (its id may differ from the existing pair).
+          const hovered = network.networkState.nodes.get(nodeHit.nodeId)
+          const pos =
+            hovered !== undefined
+              ? hovered.position
+              : ghostPointRef.current !== null
+                ? ghostPointRef.current
+                : new THREE.Vector3(0, 0, 0)
+          const ok = network.commitMountThirdClick(pos.clone(), ids, kind)
+          if (ok) s.resetMountPlacement()
+        } else {
+          const planeMesh = planeMeshRef.current
+          if (planeMesh === null) return
+          const planePoint = raycastPlane(
+            planeMesh,
+            snapshot.camera,
+            e.clientX,
+            e.clientY,
+            rect,
+          )
+          if (planePoint === null) return
+          const snapped = writeSnappedHit(planePoint)
+          const ok = network.commitMountThirdClick(snapped.clone(), ids, kind)
+          if (ok) s.resetMountPlacement()
+        }
+        return
+      }
+
+      // --- Two-click flow shared by ADD_BEAM / ADD_WHEEL / ADD_TRANSMISSION ---
+      const twoClickKind: 'BEAM' | 'WHEEL' | 'TRANSMISSION' =
+        s.mode === 'ADD_WHEEL'
+          ? 'WHEEL'
+          : s.mode === 'ADD_TRANSMISSION'
+            ? 'TRANSMISSION'
+            : 'BEAM'
+
       if (nodeHit !== null) {
         const state = useEditorStore.getState()
         const network = useNetworkStore.getState()
 
         if (state.beamStage === 'idle') {
-          const node =
-            network.networkState.nodes.get(nodeHit.nodeId)
+          const node = network.networkState.nodes.get(nodeHit.nodeId)
           if (node === undefined) return
           state.setBeamStart(nodeHit.nodeId, {
             x: node.position.x,
@@ -883,13 +1051,22 @@ export default function InteractionRouter({
           const startId = state.beamStartNodeId
           if (startId === null || startId === undefined) return
           if (nodeHit.nodeId === startId) return
-          const ok = state.symmetryEnabled
-            ? network.commitBeamEndToNodeWithSymmetry(
-                nodeHit.nodeId,
-                startId,
-                state.symmetryAxis,
-              )
-            : network.commitBeamEndToNode(nodeHit.nodeId, startId)
+          let ok = false
+          if (twoClickKind === 'BEAM') {
+            ok = state.symmetryEnabled
+              ? network.commitBeamEndToNodeWithSymmetry(
+                  nodeHit.nodeId,
+                  startId,
+                  state.symmetryAxis,
+                )
+              : network.commitBeamEndToNode(nodeHit.nodeId, startId)
+          } else {
+            ok = network.commitPartEndToNode(
+              nodeHit.nodeId,
+              startId,
+              twoClickKind,
+            )
+          }
           if (ok) state.resetBeamPlacement()
         }
         return
@@ -916,8 +1093,10 @@ export default function InteractionRouter({
 
       if (state.beamStage === 'idle') {
         const { setBeamStart } = useEditorStore.getState()
-        const { commitBeamStart } = useNetworkStore.getState()
-        const startNodeId = commitBeamStart(snapped.clone())
+        const network = useNetworkStore.getState()
+        // Click 1 attaches to a new-or-existing node at the plane point. Beam
+        // and parts share commitPartStart (same findOrCreateNode merge).
+        const startNodeId = network.commitPartStart(snapped.clone())
 
         const startNode =
           useNetworkStore.getState().networkState.nodes.get(startNodeId)
@@ -941,13 +1120,18 @@ export default function InteractionRouter({
         if (beamStartNodeId === null || beamStartNodeId === undefined) return
 
         const network = useNetworkStore.getState()
-        const ok = ed.symmetryEnabled
-          ? network.commitBeamEndWithSymmetry(
-              endPoint,
-              beamStartNodeId,
-              ed.symmetryAxis,
-            )
-          : network.commitBeamEnd(endPoint, beamStartNodeId)
+        let ok = false
+        if (twoClickKind === 'BEAM') {
+          ok = ed.symmetryEnabled
+            ? network.commitBeamEndWithSymmetry(
+                endPoint,
+                beamStartNodeId,
+                ed.symmetryAxis,
+              )
+            : network.commitBeamEnd(endPoint, beamStartNodeId)
+        } else {
+          ok = network.commitPartEnd(endPoint, beamStartNodeId, twoClickKind)
+        }
         if (ok) ed.resetBeamPlacement()
       }
     }

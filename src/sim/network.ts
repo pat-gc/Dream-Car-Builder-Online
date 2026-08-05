@@ -1,11 +1,21 @@
 import * as THREE from 'three'
 import type { Beam3D, Node3D } from '../types/nodeGraph'
+import type {
+  RigidMount,
+  RigidMountType,
+  TransmissionLink,
+  WheelPart,
+} from '../types/vehicleParts'
 
 export type SymmetryAxis = 'X' | 'Z'
 
 export interface NetworkState {
   nodes: Map<string, Node3D>
   beams: Map<string, Beam3D>
+  // Step 16a — vehicle parts (same pure-functional Map pattern as nodes/beams).
+  wheels: Map<string, WheelPart>
+  rigidMounts: Map<string, RigidMount>
+  transmissions: Map<string, TransmissionLink>
 }
 
 let idCounter = 0
@@ -17,8 +27,20 @@ export const DEFAULT_DAMPING = 10
 export const DEFAULT_MAX_STRESS = Infinity
 export const DEFAULT_MERGE_THRESHOLD = 0.05
 
+export const DEFAULT_WHEEL_RADIUS = 0.5
+export const DEFAULT_WHEEL_MASS = 5
+export const DEFAULT_ENGINE_MASS = 40
+export const DEFAULT_SEAT_MASS = 5
+export const DEFAULT_TRANSMISSION_MASS = 2
+
 export function createNetworkState(): NetworkState {
-  return { nodes: new Map(), beams: new Map() }
+  return {
+    nodes: new Map(),
+    beams: new Map(),
+    wheels: new Map(),
+    rigidMounts: new Map(),
+    transmissions: new Map(),
+  }
 }
 
 export function clear(_state: NetworkState): NetworkState {
@@ -29,6 +51,9 @@ function cloneState(state: NetworkState): NetworkState {
   return {
     nodes: new Map(state.nodes),
     beams: new Map(state.beams),
+    wheels: new Map(state.wheels),
+    rigidMounts: new Map(state.rigidMounts),
+    transmissions: new Map(state.transmissions),
   }
 }
 
@@ -48,7 +73,23 @@ export function cloneNetworkState(state: NetworkState): NetworkState {
   for (const [id, beam] of state.beams) {
     beams.set(id, { ...beam })
   }
-  return { nodes, beams }
+  const wheels = new Map<string, WheelPart>()
+  for (const [id, w] of state.wheels) {
+    wheels.set(id, { ...w })
+  }
+  const rigidMounts = new Map<string, RigidMount>()
+  for (const [id, m] of state.rigidMounts) {
+    rigidMounts.set(id, {
+      ...m,
+      nodeIds: [m.nodeIds[0], m.nodeIds[1], m.nodeIds[2]],
+      restLengths: [m.restLengths[0], m.restLengths[1], m.restLengths[2]],
+    })
+  }
+  const transmissions = new Map<string, TransmissionLink>()
+  for (const [id, t] of state.transmissions) {
+    transmissions.set(id, { ...t })
+  }
+  return { nodes, beams, wheels, rigidMounts, transmissions }
 }
 
 export function resetKinematics(state: NetworkState): NetworkState {
@@ -142,6 +183,24 @@ export function removeNode(
   for (const [beamId, beam] of next.beams) {
     if (beam.nodeAId === nodeId || beam.nodeBId === nodeId) {
       next.beams.delete(beamId)
+    }
+  }
+
+  // Step 16a — cascade-delete vehicle parts that reference this node. All
+  // three part types attach to real structural nodes, so all must be cleaned.
+  for (const [id, w] of next.wheels) {
+    if (w.nodeAId === nodeId || w.nodeBId === nodeId) {
+      next.wheels.delete(id)
+    }
+  }
+  for (const [id, m] of next.rigidMounts) {
+    if (m.nodeIds[0] === nodeId || m.nodeIds[1] === nodeId || m.nodeIds[2] === nodeId) {
+      next.rigidMounts.delete(id)
+    }
+  }
+  for (const [id, t] of next.transmissions) {
+    if (t.nodeAId === nodeId || t.nodeBId === nodeId) {
+      next.transmissions.delete(id)
     }
   }
   return next
@@ -537,4 +596,122 @@ export function commitDraggedMoves(
   }
 
   return { state: working, movedOrDefaultIds, survivingNodeIds }
+}
+
+// ---------------------------------------------------------------------------
+// Step 16a — Vehicle parts network manager functions.
+// All pure: return a new cloned state (or null on validation failure), never
+// mutate. Parts attach to existing structural nodes; findOrCreateNode lives at
+// the interaction layer (like addBeam), so these validate ids only.
+// ---------------------------------------------------------------------------
+
+export function addWheelPart(
+  state: NetworkState,
+  nodeAId: string,
+  nodeBId: string,
+  wheelRadius: number = DEFAULT_WHEEL_RADIUS,
+  mass: number = DEFAULT_WHEEL_MASS,
+): { state: NetworkState; part: WheelPart } | null {
+  if (nodeAId === nodeBId) return null
+  const a = state.nodes.get(nodeAId)
+  const b = state.nodes.get(nodeBId)
+  if (a === undefined || b === undefined) return null
+
+  const next = cloneState(state)
+  const id = nextId()
+  const part: WheelPart = {
+    id,
+    nodeAId,
+    nodeBId,
+    restLength: a.position.distanceTo(b.position),
+    wheelRadius,
+    mass,
+  }
+  next.wheels.set(id, part)
+  return { state: next, part }
+}
+
+export function addRigidMount(
+  state: NetworkState,
+  type: RigidMountType,
+  nodeIds: [string, string, string],
+  mass: number = type === 'ENGINE' ? DEFAULT_ENGINE_MASS : DEFAULT_SEAT_MASS,
+): { state: NetworkState; part: RigidMount } | null {
+  // Require three distinct node ids.
+  if (
+    nodeIds[0] === nodeIds[1] ||
+    nodeIds[0] === nodeIds[2] ||
+    nodeIds[1] === nodeIds[2]
+  ) {
+    return null
+  }
+  const n0 = state.nodes.get(nodeIds[0])
+  const n1 = state.nodes.get(nodeIds[1])
+  const n2 = state.nodes.get(nodeIds[2])
+  if (n0 === undefined || n1 === undefined || n2 === undefined) return null
+
+  // Constraint: only one ENGINE and one SEAT in the network at a time.
+  for (const existing of state.rigidMounts.values()) {
+    if (existing.type === type) return null
+  }
+
+  const next = cloneState(state)
+  const id = nextId()
+  const part: RigidMount = {
+    id,
+    type,
+    nodeIds: [nodeIds[0], nodeIds[1], nodeIds[2]],
+    restLengths: [
+      n0.position.distanceTo(n1.position),
+      n1.position.distanceTo(n2.position),
+      n2.position.distanceTo(n0.position),
+    ],
+    mass,
+  }
+  next.rigidMounts.set(id, part)
+  return { state: next, part }
+}
+
+export function addTransmissionLink(
+  state: NetworkState,
+  nodeAId: string,
+  nodeBId: string,
+  mass: number = DEFAULT_TRANSMISSION_MASS,
+): { state: NetworkState; part: TransmissionLink } | null {
+  if (nodeAId === nodeBId) return null
+  const a = state.nodes.get(nodeAId)
+  const b = state.nodes.get(nodeBId)
+  if (a === undefined || b === undefined) return null
+
+  // No restLength / no physics constraint — purely a logical link. Multiple
+  // transmission links are allowed (no uniqueness constraint).
+  const next = cloneState(state)
+  const id = nextId()
+  const part: TransmissionLink = { id, nodeAId, nodeBId, mass }
+  next.transmissions.set(id, part)
+  return { state: next, part }
+}
+
+export function removePart(
+  state: NetworkState,
+  partId: string,
+): NetworkState {
+  // Search across all three part maps; remove at most one. Does NOT touch the
+  // underlying structural nodes (parts are layered on the node graph).
+  if (state.wheels.has(partId)) {
+    const next = cloneState(state)
+    next.wheels.delete(partId)
+    return next
+  }
+  if (state.rigidMounts.has(partId)) {
+    const next = cloneState(state)
+    next.rigidMounts.delete(partId)
+    return next
+  }
+  if (state.transmissions.has(partId)) {
+    const next = cloneState(state)
+    next.transmissions.delete(partId)
+    return next
+  }
+  return state
 }
